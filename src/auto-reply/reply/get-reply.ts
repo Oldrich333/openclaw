@@ -424,6 +424,7 @@ export async function getReplyFromConfig(
       resolveDefaultModel({
         cfg,
         agentId,
+        sessionKey: agentSessionKey,
       }),
   );
   let provider = defaultProvider;
@@ -1091,6 +1092,8 @@ export async function getReplyFromConfig(
       blockReplyChunking,
       resolvedBlockStreamingBreak,
       resolveDefaultThinkingLevel: modelState.resolveDefaultThinkingLevel,
+      blockedModelOverrideRef: modelState.blockedModelOverrideRef,
+      blockedModelOverrideUsesPrimary: modelState.blockedModelOverrideUsesPrimary,
       provider,
       model,
       contextTokens,
