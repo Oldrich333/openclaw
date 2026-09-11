@@ -52,6 +52,7 @@ type GatewayAgentRuntime = NonNullable<GatewayAgentRow["agentRuntime"]> & {
 type NewSessionMetadataStatus = ChatModelCatalogState["status"];
 type NewSessionMetadataState = {
   catalog: ModelCatalogEntry[];
+  allowList?: ModelCatalogResult["allowList"];
   accountSelection?: ChatAccountSelection;
   refreshFailed?: boolean;
   hasSnapshot: boolean;
@@ -175,6 +176,7 @@ export class NewSessionModelControl {
   private publishMetadataCatalog(result: ModelCatalogResult) {
     this.metadataState = {
       catalog: result.models,
+      allowList: result.allowList,
       accountSelection: result.accountSelection,
       ...resolveModelCatalogState(result),
     };
@@ -624,6 +626,7 @@ export class NewSessionModelControl {
       gatewayAvailable: Boolean(snapshot?.client),
       loading: false,
       modelCatalog: this.catalog,
+      modelAllowList: this.metadataState.allowList,
       modelCatalogState: {
         // The model catalog and agents.list hydrate independently. Do not expose a
         // ready catalog until the selected agent can supply its concrete defaults.
