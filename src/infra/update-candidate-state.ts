@@ -1,4 +1,3 @@
-import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -29,15 +28,13 @@ import {
   prepareSqliteReadOnlyLocationSyncInProcess,
   removeTempDirectory,
 } from "./sqlite-readonly-location.js";
-import {
-  readSqliteInspectionSizeBytes,
-  resolveAggregateSqliteInspectionTimeoutMs,
-} from "./sqlite-readonly-worker.js";
+import { resolveAggregateSqliteInspectionTimeoutMs } from "./sqlite-readonly-worker.js";
 import { readSqliteUserVersion } from "./sqlite-user-version.js";
 import {
   resolveUpdateCandidateStateIdentity,
   resolveUpdateCandidateStatePath,
 } from "./update-candidate-paths.js";
+import { readUpdateStateDatabaseSizes } from "./update-candidate-state.sizes.js";
 
 const UpdateStateSchemaVersionsSchema = z.array(
   z.object({
@@ -364,28 +361,6 @@ export async function readUpdateStateSchemaVersionsInProcess(
   return publishStateDatabaseVersions(files, inspected);
 }
 
-function statStateDatabases(
-  files: readonly string[],
-): Array<{ path: string; sizeBytes: bigint | undefined }> {
-  const databases: Array<{ path: string; sizeBytes: bigint | undefined }> = [];
-  for (const file of files) {
-    const sizeBytes = readSqliteInspectionSizeBytes(file);
-    if (sizeBytes !== undefined) {
-      databases.push({ path: file, sizeBytes });
-      continue;
-    }
-    try {
-      fsSync.statSync(file);
-      databases.push({ path: file, sizeBytes: undefined });
-    } catch (error) {
-      if (!hasNodeErrorCode(error, "ENOENT")) {
-        databases.push({ path: file, sizeBytes: undefined });
-      }
-    }
-  }
-  return databases;
-}
-
 async function runUpdateStateInspectionWorker(params: {
   input: StateInput & Record<string, unknown>;
   nodeRunner: string;
@@ -519,7 +494,8 @@ export async function readUpdateStateSchemaVersions({
   let outcome: { value: UpdateStateSchemaVersion[] } | { cause: unknown };
   try {
     const shared = path.resolve(input.stateDir, "state", "openclaw.sqlite");
-    const [sharedDatabase] = statStateDatabases([shared]);
+    const sizeOptions = { nodeRunner, signal, sourceEnv, stagingRoot };
+    const [sharedDatabase] = await readUpdateStateDatabaseSizes([shared], sizeOptions);
     const discoveryResult = await runUpdateStateInspectionWorker({
       input: { ...input, mode: "discover", stagingRoot },
       nodeRunner,
@@ -571,7 +547,7 @@ export async function readUpdateStateSchemaVersions({
           stagingRoot,
           timeoutMs: resolveAggregateSqliteInspectionTimeoutMs(
             "state schema inspection",
-            statStateDatabases(files),
+            await readUpdateStateDatabaseSizes(files, sizeOptions),
           ),
         }),
         UpdateStateSchemaVersionsSchema,
