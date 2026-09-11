@@ -1,5 +1,6 @@
 import { collectErrorGraphCandidates, formatErrorMessageWithCode } from "./errors.js";
 import {
+  discoverUpdateStateSchemaInspectionInProcess,
   readUpdateCandidateStateInventoryInProcess,
   readUpdateStateSchemaVersionsInProcess,
   snapshotUpdateCandidateState,
@@ -15,18 +16,26 @@ async function snapshotCandidateState(): Promise<void> {
   // SAFETY: Only the updater's typed snapshot/versions launchers serialize this private worker's stdin.
   const input = JSON.parse(Buffer.concat(chunks).toString("utf8")) as
     | (Parameters<typeof snapshotUpdateCandidateState>[0] & { mode: "snapshot" })
+    | (Parameters<typeof discoverUpdateStateSchemaInspectionInProcess>[0] & { mode: "discover" })
     | (Parameters<typeof readUpdateStateSchemaVersionsInProcess>[0] & {
         mode: "versions" | "inventory";
       });
-  if (input.mode !== "snapshot" && input.mode !== "versions" && input.mode !== "inventory") {
+  if (
+    input.mode !== "snapshot" &&
+    input.mode !== "versions" &&
+    input.mode !== "inventory" &&
+    input.mode !== "discover"
+  ) {
     throw new Error("Unknown update state inspection mode");
   }
   const versions =
     input.mode === "snapshot"
       ? await snapshotUpdateCandidateState(input)
-      : input.mode === "inventory"
-        ? [...(await readUpdateCandidateStateInventoryInProcess(input))]
-        : await readUpdateStateSchemaVersionsInProcess(input);
+      : input.mode === "discover"
+        ? await discoverUpdateStateSchemaInspectionInProcess(input)
+        : input.mode === "inventory"
+          ? [...(await readUpdateCandidateStateInventoryInProcess(input))]
+          : await readUpdateStateSchemaVersionsInProcess(input);
   process.stdout.write(JSON.stringify(versions));
 }
 
