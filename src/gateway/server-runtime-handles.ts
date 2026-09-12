@@ -27,6 +27,9 @@ export type GatewayConfigReloaderHandle = {
   getDeferredChannelReloads?: () => readonly GatewayDeferredChannelReload[];
   notifyPluginMetadataChanged: () => void;
   isConfigReloadSettled: () => boolean;
+  reconcileExternalWrite: () => Promise<
+    import("../config/runtime-write-application.js").RuntimeConfigWriteApplicationStatus
+  >;
 };
 
 /** Mutable handles owned by a running gateway server process. */
@@ -72,6 +75,7 @@ export function createGatewayServerMutableState(): GatewayServerMutableState {
       stop: async () => {},
       notifyPluginMetadataChanged: () => {},
       isConfigReloadSettled: () => false,
+      reconcileExternalWrite: async () => "unclaimed",
     } satisfies GatewayConfigReloaderHandle,
     agentUnsub: null as (() => Promise<void> | void) | null,
     heartbeatUnsub: null as (() => void) | null,

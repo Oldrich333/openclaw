@@ -340,6 +340,7 @@ export function prepareAgentRuntimeAuth(
           store,
           provider: authProfileSelectionProvider,
           preferredProfile: requestedProfileId,
+          retainedProfile: params.preferredAuthProfileId,
           forModel: params.modelId,
           readinessMode: "read-only",
           includePendingOAuthRefresh: true,

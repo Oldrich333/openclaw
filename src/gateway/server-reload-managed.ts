@@ -64,6 +64,7 @@ export function startManagedGatewayConfigReloader(
       },
       notifyPluginMetadataChanged: () => {},
       isConfigReloadSettled: () => !lifecycle.signal.aborted,
+      reconcileExternalWrite: async () => "unclaimed",
     };
   }
 
@@ -536,6 +537,7 @@ export function startManagedGatewayConfigReloader(
     hotReloadStatus: configReloader.hotReloadStatus,
     getDeferredChannelReloads,
     notifyPluginMetadataChanged: configReloader.notifyPluginMetadataChanged,
+    reconcileExternalWrite: configReloader.reconcileExternalWrite,
     // Equal config revisions can still owe a plugin/runtime restart.
     isConfigReloadSettled: () =>
       configReloader.isReady() &&

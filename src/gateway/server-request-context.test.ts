@@ -53,7 +53,10 @@ function makeContextParams(overrides: Partial<RequestRuntime> = {}): GatewayRequ
       deps: {} as never,
       runtimeState: {
         cronState: makeCronState(),
-        configReloader: { isConfigReloadSettled: vi.fn(() => true) },
+        configReloader: {
+          isConfigReloadSettled: vi.fn(() => true),
+          reconcileExternalWrite: vi.fn(async () => "applied" as const),
+        },
       },
       lifecycle: { closePreludeStarted: false },
       getAttachedGatewayMethodRegistry: vi.fn(() => ({}) as never),
@@ -263,7 +266,10 @@ describe("createGatewayRequestContext", () => {
     const cronB = { start: vi.fn(), stop: vi.fn() } as never;
     const runtimeState: RequestRuntime["runtimeState"] = {
       cronState: makeCronState({ cron: cronA, storePath: "/tmp/cron-a" }),
-      configReloader: { isConfigReloadSettled: () => true },
+      configReloader: {
+        isConfigReloadSettled: () => true,
+        reconcileExternalWrite: async () => "applied",
+      },
     };
 
     const context = createGatewayRequestContext(makeContextParams({ runtimeState }));
@@ -300,6 +306,7 @@ describe("createGatewayRequestContext", () => {
     const deferred = [{ channel: "discord", publicationPending: true }];
     params.runtime.runtimeState.configReloader = {
       isConfigReloadSettled: () => false,
+      reconcileExternalWrite: async () => "stopped",
       getDeferredChannelReloads: () => deferred,
     };
     expect(context.getDeferredChannelReloads?.()).toEqual(deferred);
