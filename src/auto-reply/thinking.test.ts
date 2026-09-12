@@ -133,19 +133,12 @@ describe("prepared thinking catalog identity", () => {
 });
 
 describe("listThinkingLevels", () => {
-  it("uses provider thinking profiles for xhigh support", () => {
+  it("uses provider thinking profiles for xhigh support and labels", () => {
     providerRuntimeMocks.resolveProviderThinkingProfile.mockReturnValue({
       levels: [{ id: "off" }, { id: "low" }, { id: "xhigh" }],
     });
 
     expect(listThinkingLevels("demo", "demo-model")).toContain("xhigh");
-  });
-
-  it("uses provider thinking profiles for xhigh labels", () => {
-    providerRuntimeMocks.resolveProviderThinkingProfile.mockReturnValue({
-      levels: [{ id: "off" }, { id: "low" }, { id: "xhigh" }],
-    });
-
     expect(listThinkingLevelLabels("demo", "demo-model")).toContain("xhigh");
   });
 
@@ -1090,19 +1083,15 @@ describe("resolveThinkingDefaultForModel", () => {
 });
 
 describe("normalizeReasoningLevel", () => {
-  it("accepts on/off", () => {
-    expect(normalizeReasoningLevel("on")).toBe("on");
-    expect(normalizeReasoningLevel("off")).toBe("off");
-  });
-
-  it("accepts show/hide", () => {
-    expect(normalizeReasoningLevel("show")).toBe("on");
-    expect(normalizeReasoningLevel("hide")).toBe("off");
-  });
-
-  it("accepts stream", () => {
-    expect(normalizeReasoningLevel("stream")).toBe("stream");
-    expect(normalizeReasoningLevel("streaming")).toBe("stream");
+  it.each([
+    ["on", "on"],
+    ["off", "off"],
+    ["show", "on"],
+    ["hide", "off"],
+    ["stream", "stream"],
+    ["streaming", "stream"],
+  ])("normalizes %s to %s", (input, expected) => {
+    expect(normalizeReasoningLevel(input)).toBe(expected);
   });
 });
 
