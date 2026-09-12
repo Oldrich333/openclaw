@@ -74,6 +74,7 @@ import type {
 import { clawMonitorCleanupGateway } from "./claws-cli.monitor-cleanup.js";
 import { listCronJobsFromGateway } from "./cron-cli/list-jobs.js";
 import { callGatewayFromCli } from "./gateway-rpc.js";
+import { resolvePluginBatchReload } from "./plugins-lifecycle-client.js";
 
 function logClawAddPlanSummary(plan: ClawAddPlan, runtime: RuntimeEnv): void {
   runtime.log(`Agent: ${plan.agent.finalId}`);
@@ -469,6 +470,7 @@ export async function runClawsAddCommand(
   }
   try {
     addResult = await applyClawAddPlan(plan, {
+      reloadPlugins: await resolvePluginBatchReload(),
       consentPlanIntegrity: opts.planIntegrity,
       resumeRecord: resumableInstallRecord,
       resumePlan: legacyResumePlan,
@@ -498,6 +500,9 @@ export async function runClawsAddCommand(
     runtime.log(`Added agent: ${addResult.agent.finalId}`);
     runtime.log(`Workspace: ${addResult.agent.workspace}`);
     runtime.log(`Status: ${addResult.status}`);
+    if (addResult.error) {
+      runtime.error(addResult.error.message);
+    }
   }
   if (addResult.status !== "complete") {
     runtime.exit(1);
