@@ -1,6 +1,5 @@
 import type { ApplicationContext } from "../../app/context.ts";
 import type { PluginDiscoveryEntry, PluginListResult } from "../../lib/plugins/index.ts";
-import { CatalogIconController } from "./catalog-icon-controller.ts";
 import { PluginIconController } from "./plugin-icon-controller.ts";
 
 type PluginsPageIconsHost = {
@@ -12,7 +11,7 @@ type PluginsPageIconsHost = {
 
 export class PluginsPageIcons {
   private readonly installed: PluginIconController;
-  private readonly catalog: CatalogIconController;
+  private readonly catalog: PluginIconController;
 
   constructor(host: PluginsPageIconsHost) {
     const shared = {
@@ -34,7 +33,8 @@ export class PluginsPageIcons {
       ...shared,
       onUrlsChange: host.onInstalledUrlsChange,
     });
-    this.catalog = new CatalogIconController({
+    this.catalog = new PluginIconController({
+      kind: "catalog",
       ...shared,
       onUrlsChange: host.onCatalogUrlsChange,
     });
@@ -57,7 +57,7 @@ export class PluginsPageIcons {
   }
 
   syncCatalog(entries: readonly PluginDiscoveryEntry[], extraUrls: readonly string[] = []): void {
-    this.catalog.sync(entries, extraUrls);
+    this.catalog.syncCatalog(entries, extraUrls);
   }
 
   resetInstalled(): void {
