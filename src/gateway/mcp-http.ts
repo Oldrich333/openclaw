@@ -22,6 +22,7 @@ import { logDebug, logWarn } from "../logger.js";
 import {
   getPluginRuntimeGatewayRequestScope,
   withPluginRuntimeGatewayContextResolver,
+  withPluginRuntimeGatewayRequestScope,
 } from "../plugins/runtime/gateway-request-scope.js";
 import { runOutsidePluginRuntimeGenerationScope } from "../plugins/runtime/generation-scope.js";
 import { runOutsideGatewayRootWorkAdmission } from "../process/gateway-work-admission.js";
@@ -438,9 +439,16 @@ async function startMcpLoopbackServer(
             if (callerIdentity && boundClientGrant?.personalToolParticipants) {
               callerIdentity.personalToolParticipants = boundClientGrant.personalToolParticipants;
             }
-            response = await withGatewayToolCallerIdentity(callerIdentity, () =>
-              runWithTrackedCancellation(requestAbort.signal, handleRequest),
-            );
+            // Tool calls run under the minting run's own request scope, as in-process
+            // runtimes do, so its client stays the ceiling and its liveness still applies.
+            const runRequestScope = boundClientGrant?.requestScope;
+            const handleAsCaller = () =>
+              withGatewayToolCallerIdentity(callerIdentity, () =>
+                runWithTrackedCancellation(requestAbort.signal, handleRequest),
+              );
+            response = await (runRequestScope
+              ? withPluginRuntimeGatewayRequestScope(runRequestScope, handleAsCaller)
+              : handleAsCaller());
           } finally {
             markMcpLoopbackToolCallFinished(cliCaptureHandle);
           }
