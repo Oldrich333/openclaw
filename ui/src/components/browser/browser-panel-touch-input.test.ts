@@ -138,7 +138,8 @@ describe("Browser panel touch and pen input", () => {
     const captured = new Set<number>();
     input.setPointerCapture = vi.fn((id) => captured.add(id));
     input.hasPointerCapture = vi.fn((id) => captured.has(id));
-    input.releasePointerCapture = vi.fn((id) => captured.delete(id));
+    const releasePointerCapture = vi.fn((id) => captured.delete(id));
+    input.releasePointerCapture = releasePointerCapture;
     controller.host.renderRoot.append(input);
     input.addEventListener("pointerdown", (event) =>
       controller.input.handleOverlayPointerDown(event as PointerEvent),
@@ -151,7 +152,7 @@ describe("Browser panel touch and pen input", () => {
     controller.input.resetCaptureState();
     await vi.advanceTimersByTimeAsync(150);
     await flushBrowserResponses();
-    expect(input.releasePointerCapture).toHaveBeenCalledWith(3);
+    expect(releasePointerCapture).toHaveBeenCalledWith(3);
     expect(captured.has(3)).toBe(false);
     expect(
       request.mock.calls.filter(
