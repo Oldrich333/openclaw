@@ -63,7 +63,7 @@ interface BrowserPanelInputHost extends BrowserPanelInputState {
     refreshView?: boolean,
   ): Promise<boolean>;
   reportError(error: unknown): void;
-  exitCaptureModes(): void;
+  exitCaptureModes(preserveStageClick?: boolean): void;
 }
 
 type BrowserPanelDrawingGesture = {
@@ -94,10 +94,12 @@ export class BrowserPanelInputController {
 
   constructor(private readonly host: BrowserPanelInputHost) {}
 
-  resetCaptureState(): void {
+  resetCaptureState(preserveStageClick = false): void {
     this.host.pendingInput.clearInput();
     this.cancelOverlayPointerGesture();
-    this.suppressStageClick = false;
+    if (!preserveStageClick) {
+      this.suppressStageClick = false;
+    }
     this.pendingClick = null;
     this.clickSequence += 1;
     this.inputGeneration += 1;
@@ -500,7 +502,7 @@ export class BrowserPanelInputController {
     }
     this.host.setState("errorText", null);
     this.host.setState("noticeText", t("browser.annotationSent"));
-    this.host.exitCaptureModes();
+    this.host.exitCaptureModes(this.suppressStageClick);
   }
 
   /** Repaints the live stroke/highlight overlay; cheap, runs after render. */
