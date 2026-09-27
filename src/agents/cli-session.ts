@@ -235,7 +235,7 @@ export function stripCliSessionDriftNote(text: string): string {
  * or a same-profile pair (ids equal), returns `false` and keeps today's strict
  * per-profile invalidation.
  */
-function areOperatorEquivalentProfiles(
+export function areOperatorEquivalentProfiles(
   historyEquivalenceGroups: readonly (readonly string[])[] | undefined,
   storedProfileId: string | undefined,
   currentProfileId: string | undefined,

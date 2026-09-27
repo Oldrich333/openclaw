@@ -243,6 +243,8 @@ openclaw models auth paste-token --provider anthropic
 New sessions select saved subscription credentials through the configured account
 order and forward them to the CLI through a protected file descriptor. Existing
 sessions keep their account until you select another or remove its saved profile.
+When that account is unusable (rate limit, cooldown) and
+`auth.historyEquivalenceGroups` (below) declares a usable profile equivalent to it, the session moves to that profile.
 Explicit account selections and empty account orders remain authoritative. API keys saved
 for the `anthropic` provider require an explicit selection; they do not replace
 native subscription login automatically.
@@ -320,9 +322,11 @@ What the setting does and does not do:
   history still follows the account-boundary rules above, and mixed-account
   history stays ineligible. Grouping two profiles does not make one account's
   saved transcript replayable under another.
-- **Billing and routing are unaffected.** Each turn is still billed to the
-  profile that actually served it; the setting never changes which profile is
-  selected.
+- **Billing follows the serving profile.** Each turn is billed to the profile
+  that actually served it. Selection changes in one case only: a bound session
+  whose profile is unusable (rate limit, cooldown) moves to the first usable
+  profile in the configured order that shares a group with it. A usable bound
+  profile and an explicit selection are never replaced.
 - **Membership is per group, not transitive.** Two ids are equivalent only when a
   **single** group contains both. With `[["a","b"], ["b","c"]]`, the swaps
   `a↔b` and `b↔c` preserve the session, but `a↔c` does not, because `a` and `c`

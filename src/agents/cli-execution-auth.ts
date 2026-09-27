@@ -6,8 +6,10 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveAuthProfileOrderWithMetadata } from "./auth-profiles/order.js";
 import { loadAuthProfileStoreForRuntime } from "./auth-profiles/store-runtime.js";
 import type { AuthProfileCredential } from "./auth-profiles/types.js";
+import { isProfileInCooldown } from "./auth-profiles/usage-state.js";
 import { resolveCliBackendConfig, resolveCliRuntimeCanonicalProvider } from "./cli-backends.js";
 import { resolveBundledCliBackendAuthPolicy } from "./cli-runner/cli-backend-auth-policy.js";
+import { areOperatorEquivalentProfiles } from "./cli-session.js";
 
 const GOOGLE_GEMINI_CLI_PROVIDER_ID = "google-gemini-cli";
 const GOOGLE_PROVIDER_ID = "google";
@@ -34,7 +36,8 @@ export function cliBackendAcceptsAuthProfileForwarding(params: {
 }
 
 /**
- * Preserve the session account unless the user selects another or it was removed.
+ * Preserve the session account unless the user selects another, it was removed,
+ * or it is unusable while an operator-equivalent profile is available.
  * A user-locked profile must fail closed rather than run as another user.
  */
 export function resolveCliExecutionAuthProfileId(params: {
@@ -88,6 +91,18 @@ export function resolveCliExecutionAuthProfileId(params: {
         ? explicitSelection || credential.type !== "api_key"
         : params.cliExecutionProvider === GOOGLE_GEMINI_CLI_PROVIDER_ID &&
           credential.type === "api_key"));
+  const resolveCandidateProviders = () => {
+    const providers = [params.cliExecutionProvider];
+    if (
+      canonicalProvider &&
+      (params.cliExecutionProvider === CLAUDE_CLI_PROVIDER_ID ||
+        (params.cliExecutionProvider === GOOGLE_GEMINI_CLI_PROVIDER_ID &&
+          params.authProfileProvider === GOOGLE_PROVIDER_ID))
+    ) {
+      providers.push(canonicalProvider);
+    }
+    return providers;
+  };
   if (retainedProfileId) {
     const credential = store.profiles[retainedProfileId];
     if (!credential) {
@@ -96,6 +111,36 @@ export function resolveCliExecutionAuthProfileId(params: {
       );
     }
     if (acceptsCredential(credential, true)) {
+      if (hasExplicitSelection || !isProfileInCooldown(store, retainedProfileId)) {
+        return retainedProfileId;
+      }
+      // A bound session may move only to a usable profile the operator declared
+      // equivalent (`auth.historyEquivalenceGroups`); the native session survives that swap.
+      for (const provider of resolveCandidateProviders()) {
+        const order = resolveAuthProfileOrderWithMetadata({
+          cfg: params.config,
+          store,
+          provider,
+          preferredProfile: selectedAuthProfileId,
+        });
+        const replacementId = order.profileIds.find((id) => {
+          const candidate = store.profiles[id];
+          return (
+            candidate &&
+            acceptsCredential(candidate, false) &&
+            !nativeAuthProfileIds?.includes(id) &&
+            areOperatorEquivalentProfiles(
+              params.config.auth?.historyEquivalenceGroups,
+              retainedProfileId,
+              id,
+            ) &&
+            !isProfileInCooldown(store, id)
+          );
+        });
+        if (replacementId) {
+          return replacementId;
+        }
+      }
       return retainedProfileId;
     }
     throw new CliExecutionAuthProfileError(
@@ -103,16 +148,7 @@ export function resolveCliExecutionAuthProfileId(params: {
     );
   }
 
-  const providers = [params.cliExecutionProvider];
-  if (
-    canonicalProvider &&
-    (params.cliExecutionProvider === CLAUDE_CLI_PROVIDER_ID ||
-      (params.cliExecutionProvider === GOOGLE_GEMINI_CLI_PROVIDER_ID &&
-        params.authProfileProvider === GOOGLE_PROVIDER_ID))
-  ) {
-    providers.push(canonicalProvider);
-  }
-  for (const provider of providers) {
+  for (const provider of resolveCandidateProviders()) {
     const order = resolveAuthProfileOrderWithMetadata({
       cfg: params.config,
       store,

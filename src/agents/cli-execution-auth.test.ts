@@ -6,10 +6,15 @@ import { testing as cliBackendsTesting } from "./cli-backends.test-support.js";
 const mocks = vi.hoisted(() => ({
   order: [] as string[],
   profiles: {} as Record<string, AuthProfileCredential>,
+  usageStats: {} as Record<string, { blockedUntil?: number; cooldownUntil?: number }>,
 }));
 
 vi.mock("./auth-profiles/store-runtime.js", () => ({
-  loadAuthProfileStoreForRuntime: () => ({ version: 1, profiles: mocks.profiles }),
+  loadAuthProfileStoreForRuntime: () => ({
+    version: 1,
+    profiles: mocks.profiles,
+    usageStats: mocks.usageStats,
+  }),
 }));
 
 vi.mock("./auth-profiles/order.js", () => ({
@@ -43,6 +48,9 @@ describe("resolveCliExecutionAuthProfileId", () => {
     mocks.order.length = 0;
     for (const profileId of Object.keys(mocks.profiles)) {
       delete mocks.profiles[profileId];
+    }
+    for (const profileId of Object.keys(mocks.usageStats)) {
+      delete mocks.usageStats[profileId];
     }
   });
 
@@ -337,5 +345,68 @@ describe("resolveCliExecutionAuthProfileId", () => {
         },
       }),
     ).toBe("google-gemini-cli:alice");
+  });
+
+  describe("bound session on an unusable profile", () => {
+    const bound = "anthropic:max";
+    const spare = "anthropic:team";
+    const groups = [[bound, spare]];
+    const resolveBound = (params: {
+      historyEquivalenceGroups?: string[][];
+      selected?: { authProfileId: string; authProfileIdSource: "auto" | "user" };
+    }) =>
+      resolveCliExecutionAuthProfileId({
+        cliExecutionProvider: "claude-cli",
+        authProfileProvider: "anthropic",
+        config: params.historyEquivalenceGroups
+          ? { auth: { historyEquivalenceGroups: params.historyEquivalenceGroups } }
+          : {},
+        agentDir: "/tmp/unused-agent",
+        sessionBinding: { sessionId: "claude-session", authProfileId: bound },
+        ...(params.selected ? { selected: params.selected } : {}),
+      });
+
+    beforeEach(() => {
+      for (const profileId of [bound, spare]) {
+        mocks.profiles[profileId] = {
+          type: "token",
+          provider: "anthropic",
+          token: `test-${profileId}`,
+        };
+      }
+      mocks.order.push(bound, spare);
+      mocks.usageStats[bound] = { blockedUntil: Date.now() + 60 * 60_000 };
+    });
+
+    it("moves to a usable operator-equivalent profile", () => {
+      expect(resolveBound({ historyEquivalenceGroups: groups })).toBe(spare);
+    });
+
+    it("keeps the bound profile when no equivalence group is configured", () => {
+      expect(resolveBound({})).toBe(bound);
+    });
+
+    it("keeps the bound profile when the usable profile shares no group with it", () => {
+      expect(resolveBound({ historyEquivalenceGroups: [[spare, "anthropic:other"]] })).toBe(bound);
+    });
+
+    it("keeps the bound profile when every equivalent profile is unusable too", () => {
+      mocks.usageStats[spare] = { cooldownUntil: Date.now() + 60_000 };
+      expect(resolveBound({ historyEquivalenceGroups: groups })).toBe(bound);
+    });
+
+    it("keeps a usable bound profile even when an equivalent one exists", () => {
+      delete mocks.usageStats[bound];
+      expect(resolveBound({ historyEquivalenceGroups: groups })).toBe(bound);
+    });
+
+    it("never moves an explicit user selection", () => {
+      expect(
+        resolveBound({
+          historyEquivalenceGroups: groups,
+          selected: { authProfileId: bound, authProfileIdSource: "user" },
+        }),
+      ).toBe(bound);
+    });
   });
 });
