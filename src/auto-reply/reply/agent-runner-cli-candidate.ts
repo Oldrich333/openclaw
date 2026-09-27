@@ -190,6 +190,7 @@ export async function runCliFallbackCandidate(
               agentDir: params.candidateRun.agentDir,
               selected: params.candidateRun,
               sessionBinding: cliSessionBinding,
+              modelId: params.model,
             })
           : resolveRunAuthProfile(params.candidateRun, params.cliExecutionProvider, {
               config: params.runtimeConfig,

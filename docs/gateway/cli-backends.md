@@ -315,17 +315,19 @@ keeps today's strict behavior byte for byte.
 
 What the setting does and does not do:
 
-- **Scope.** It affects only native `--resume` continuity — whether the stored
-  provider-side session id survives a profile swap. It is not an authorization
-  input anywhere else.
+- **Scope.** It has two effects: native `--resume` continuity (whether the stored
+  provider-side session id survives a swap between members of one group), and
+  which group member serves a bound session whose profile is unusable (next
+  bullets). It is not an authorization input anywhere else.
 - **Saved-history recovery is unaffected.** Permission to replay saved OpenClaw
   history still follows the account-boundary rules above, and mixed-account
   history stays ineligible. Grouping two profiles does not make one account's
   saved transcript replayable under another.
 - **Billing follows the serving profile.** Each turn is billed to the profile
   that actually served it. Selection changes in one case only: a bound session
-  whose profile is unusable (rate limit, cooldown) moves to the first usable
-  profile in the configured order that shares a group with it. A usable bound
+  whose profile is unusable for the turn's model (rate limit, cooldown) moves to
+  the first usable profile in the configured order that shares a group with it;
+  an explicit auth order for the CLI provider bounds that search. A usable bound
   profile and an explicit selection are never replaced.
 - **Membership is per group, not transitive.** Two ids are equivalent only when a
   **single** group contains both. With `[["a","b"], ["b","c"]]`, the swaps

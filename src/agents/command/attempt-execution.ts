@@ -679,6 +679,7 @@ export function runAgentAttempt(params: {
               agentDir: params.agentDir,
               selected: harnessAuthSelection,
               sessionBinding: cliSessionBinding,
+              modelId: params.modelOverride,
             })
           : authProfileId;
         const diagnosticOwner = params.deferredLifecycle?.handoffToCli();

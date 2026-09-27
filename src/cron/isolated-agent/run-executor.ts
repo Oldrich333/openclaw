@@ -534,6 +534,7 @@ function createCronPromptExecutor(
                       config: params.cfgWithAgentDefaults,
                       agentDir: params.agentDir,
                       sessionBinding: cliSessionBinding,
+                      modelId: modelOverride,
                       selected: params.liveSelection.authProfileId
                         ? {
                             authProfileId: params.liveSelection.authProfileId,

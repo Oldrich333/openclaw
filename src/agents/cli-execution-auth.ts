@@ -47,6 +47,8 @@ export function resolveCliExecutionAuthProfileId(params: {
   agentDir: string;
   selected?: CliExecutionAuthProfileSelection;
   sessionBinding?: CliSessionBinding;
+  /** Model of this turn; scopes cooldown checks for a bound-profile move. */
+  modelId?: string;
   loadAuthProfileStoreForRuntime?: typeof loadAuthProfileStoreForRuntime;
 }): string | undefined {
   const loadStore = params.loadAuthProfileStoreForRuntime ?? loadAuthProfileStoreForRuntime;
@@ -111,7 +113,10 @@ export function resolveCliExecutionAuthProfileId(params: {
       );
     }
     if (acceptsCredential(credential, true)) {
-      if (hasExplicitSelection || !isProfileInCooldown(store, retainedProfileId)) {
+      if (
+        hasExplicitSelection ||
+        !isProfileInCooldown(store, retainedProfileId, undefined, params.modelId)
+      ) {
         return retainedProfileId;
       }
       // A bound session may move only to a usable profile the operator declared
@@ -122,6 +127,7 @@ export function resolveCliExecutionAuthProfileId(params: {
           store,
           provider,
           preferredProfile: selectedAuthProfileId,
+          forModel: params.modelId,
         });
         const replacementId = order.profileIds.find((id) => {
           const candidate = store.profiles[id];
@@ -134,11 +140,14 @@ export function resolveCliExecutionAuthProfileId(params: {
               retainedProfileId,
               id,
             ) &&
-            !isProfileInCooldown(store, id)
+            !isProfileInCooldown(store, id, undefined, params.modelId)
           );
         });
         if (replacementId) {
           return replacementId;
+        }
+        if (order.hasExplicitOrder) {
+          break;
         }
       }
       return retainedProfileId;

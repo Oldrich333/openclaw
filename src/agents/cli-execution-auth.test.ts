@@ -6,7 +6,16 @@ import { testing as cliBackendsTesting } from "./cli-backends.test-support.js";
 const mocks = vi.hoisted(() => ({
   order: [] as string[],
   profiles: {} as Record<string, AuthProfileCredential>,
-  usageStats: {} as Record<string, { blockedUntil?: number; cooldownUntil?: number }>,
+  orderByProvider: {} as Record<string, { profileIds: string[]; hasExplicitOrder: boolean }>,
+  usageStats: {} as Record<
+    string,
+    {
+      blockedUntil?: number;
+      cooldownUntil?: number;
+      cooldownReason?: "rate_limit";
+      cooldownModel?: string;
+    }
+  >,
 }));
 
 vi.mock("./auth-profiles/store-runtime.js", () => ({
@@ -18,10 +27,11 @@ vi.mock("./auth-profiles/store-runtime.js", () => ({
 }));
 
 vi.mock("./auth-profiles/order.js", () => ({
-  resolveAuthProfileOrderWithMetadata: () => ({
-    profileIds: mocks.order,
-    hasExplicitOrder: false,
-  }),
+  resolveAuthProfileOrderWithMetadata: (params: { provider: string }) =>
+    mocks.orderByProvider[params.provider] ?? {
+      profileIds: mocks.order,
+      hasExplicitOrder: false,
+    },
 }));
 
 import { resolveCliExecutionAuthProfileId } from "./cli-execution-auth.js";
@@ -46,6 +56,9 @@ describe("resolveCliExecutionAuthProfileId", () => {
       resolvePluginSetupCliBackend: () => undefined,
     });
     mocks.order.length = 0;
+    for (const provider of Object.keys(mocks.orderByProvider)) {
+      delete mocks.orderByProvider[provider];
+    }
     for (const profileId of Object.keys(mocks.profiles)) {
       delete mocks.profiles[profileId];
     }
@@ -354,6 +367,7 @@ describe("resolveCliExecutionAuthProfileId", () => {
     const resolveBound = (params: {
       historyEquivalenceGroups?: string[][];
       selected?: { authProfileId: string; authProfileIdSource: "auto" | "user" };
+      modelId?: string;
     }) =>
       resolveCliExecutionAuthProfileId({
         cliExecutionProvider: "claude-cli",
@@ -364,6 +378,7 @@ describe("resolveCliExecutionAuthProfileId", () => {
         agentDir: "/tmp/unused-agent",
         sessionBinding: { sessionId: "claude-session", authProfileId: bound },
         ...(params.selected ? { selected: params.selected } : {}),
+        ...(params.modelId ? { modelId: params.modelId } : {}),
       });
 
     beforeEach(() => {
@@ -398,6 +413,39 @@ describe("resolveCliExecutionAuthProfileId", () => {
     it("keeps a usable bound profile even when an equivalent one exists", () => {
       delete mocks.usageStats[bound];
       expect(resolveBound({ historyEquivalenceGroups: groups })).toBe(bound);
+    });
+
+    it("stops at an explicit CLI order that holds no equivalent profile", () => {
+      mocks.orderByProvider["claude-cli"] = { profileIds: [], hasExplicitOrder: true };
+      expect(resolveBound({ historyEquivalenceGroups: groups })).toBe(bound);
+    });
+
+    it("keeps the bound profile when its cooldown belongs to another model", () => {
+      mocks.usageStats[bound] = {
+        cooldownUntil: Date.now() + 60 * 60_000,
+        cooldownReason: "rate_limit",
+        cooldownModel: "claude-opus-4-7",
+      };
+      expect(resolveBound({ historyEquivalenceGroups: groups, modelId: "claude-sonnet-5" })).toBe(
+        bound,
+      );
+      expect(resolveBound({ historyEquivalenceGroups: groups, modelId: "claude-opus-4-7" })).toBe(
+        spare,
+      );
+    });
+
+    it("uses an equivalent profile whose cooldown belongs to another model", () => {
+      mocks.usageStats[spare] = {
+        cooldownUntil: Date.now() + 60 * 60_000,
+        cooldownReason: "rate_limit",
+        cooldownModel: "claude-opus-4-7",
+      };
+      expect(resolveBound({ historyEquivalenceGroups: groups, modelId: "claude-sonnet-5" })).toBe(
+        spare,
+      );
+      expect(resolveBound({ historyEquivalenceGroups: groups, modelId: "claude-opus-4-7" })).toBe(
+        bound,
+      );
     });
 
     it("never moves an explicit user selection", () => {
