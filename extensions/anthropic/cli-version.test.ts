@@ -319,7 +319,7 @@ describe("installed CLI changes without restart", () => {
     expect(runner).toHaveBeenCalledTimes(2);
   });
 
-  it("finds a CLI installed after the first request", async () => {
+  it("finds a CLI that appears on PATH after the first request", async () => {
     vi.useFakeTimers();
     vi.mocked(resolveClaudeTerminalExecutable).mockReturnValueOnce(undefined);
     const fixture = register();

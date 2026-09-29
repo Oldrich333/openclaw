@@ -5,6 +5,7 @@ import { parseClaudeCodeVersion, supportsClaudeDynamicSystemPromptSections } fro
 import { resolveClaudeTerminalExecutable } from "./session-catalog-executable.js";
 
 // A missing, failed or slow probe keeps the transport floor this long before discovery repeats.
+// Repeated discovery sees PATH changes; the native-install fallback keeps its own restart-scoped cache.
 const FAILED_PROBE_RETRY_MS = 60_000;
 
 type Discovery = {
