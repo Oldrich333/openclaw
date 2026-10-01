@@ -112,7 +112,9 @@ budget to zero instead.
 An inherited agent-workspace `AGENTS.md` snapshot follows the current file:
 each new or resumed native thread receives the latest non-empty contents, so
 edits reach long-lived sessions without a reset. When the file is emptied,
-removed, or cannot be loaded, the last delivered snapshot stays in place.
+removed, or cannot be loaded, the session's stored snapshot stays in place: the
+last one delivered to its bound native thread. Transient restricted-turn threads
+do not update that stored snapshot.
 
 This byte budget is separate from the character-based workspace bootstrap
 limits configured through `agents.defaults.bootstrapMaxChars` and
