@@ -84,13 +84,16 @@ export function createClaudeCodeVersionProbe(api: OpenClawPluginApi) {
   };
 
   const isCurrent = (discovery: Discovery): boolean => {
-    if (discovery.failedAt !== undefined) {
-      return Date.now() - discovery.failedAt < FAILED_PROBE_RETRY_MS;
+    // A replaced executable is probed again at once, also after a failed probe.
+    if (
+      discovery.executable !== undefined &&
+      readExecutableArtifact(discovery.executable) !== discovery.artifact
+    ) {
+      return false;
     }
-    // A pending probe is shared; a successful one holds while the executable file is unchanged.
+    // A pending or successful probe is shared; a failed one holds the floor for the retry interval.
     return (
-      discovery.executable === undefined ||
-      readExecutableArtifact(discovery.executable) === discovery.artifact
+      discovery.failedAt === undefined || Date.now() - discovery.failedAt < FAILED_PROBE_RETRY_MS
     );
   };
 

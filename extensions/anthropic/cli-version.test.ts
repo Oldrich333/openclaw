@@ -319,6 +319,27 @@ describe("installed CLI changes without restart", () => {
     expect(runner).toHaveBeenCalledTimes(2);
   });
 
+  it("probes a replaced executable at once after a failed probe", async () => {
+    vi.useFakeTimers();
+    const runner = vi
+      .fn<CommandRunner>()
+      .mockRejectedValueOnce(new Error("synthetic launch failure"))
+      .mockResolvedValueOnce(versionResult("2.1.401 (Claude Code)"));
+    const fixture = register(runner);
+    const request = capture(fixture.provider, "wrapStreamFn");
+    await request.run();
+    await request.run();
+    expect(runner).toHaveBeenCalledOnce();
+    install("fixed release");
+    await request.run();
+    expect(request.base.mock.calls.map((call) => call[2]?.headers)).toEqual([
+      oauthOptions.headers,
+      oauthOptions.headers,
+      { ...oauthOptions.headers, "user-agent": "claude-cli/2.1.401" },
+    ]);
+    expect(runner).toHaveBeenCalledTimes(2);
+  });
+
   it("finds a CLI that appears on PATH after the first request", async () => {
     vi.useFakeTimers();
     vi.mocked(resolveClaudeTerminalExecutable).mockReturnValueOnce(undefined);
