@@ -22,6 +22,7 @@ import {
   hasCompletionMessageSessionSpawn,
 } from "./accepted-session-spawn.js";
 import { bindOperatorModelExecution, readRunOperatorAuthority } from "./admitted-run-context.js";
+import type { CliCommentarySegment } from "./cli-output-contracts.js";
 import { runCliBeforeAgentReply } from "./cli-runner/before-agent-reply.js";
 import { runCliCleanup } from "./cli-runner/cleanup.js";
 import { acceptsCliLiveSession } from "./cli-runner/cli-live-session-registry.js";
@@ -327,6 +328,27 @@ async function runPreparedCliAgentOwned(
 
   let deliveredMessagingSideEffect = false;
   let userTurnHandled = false;
+  // Commentary leaves the terminal reply, so each completed block is its own canonical record.
+  let commentaryWrites = Promise.resolve();
+  let commentaryCount = 0;
+  const persistCommentarySegment = (segment: CliCommentarySegment) => {
+    commentaryCount += 1;
+    const segmentKey = segment.key ?? `n${commentaryCount}`;
+    commentaryWrites = commentaryWrites
+      .then(async () => {
+        await persistCliAssistantTranscript({
+          runParams: params,
+          text: segment.text,
+          modelId: context.modelId,
+          stopReason: "stop",
+          segmentKey,
+          timestamp: segment.timestamp,
+        });
+      })
+      .catch((error: unknown) => {
+        log.warn(`CLI commentary persistence failed: ${formatErrorMessage(error)}`);
+      });
+  };
   const executeCliAttempt = async (cliSessionIdToUse?: string, options?: CliRecoveryOptions) => {
     const timeoutMs = options?.timeoutMs ?? params.timeoutMs;
     const forkCliSessionOnResume =
@@ -361,11 +383,12 @@ async function runPreparedCliAgentOwned(
             },
           };
     diagnosticLifecycle?.setPhase("send");
-    const output = await executePreparedCliRun(
-      attemptContext,
-      cliSessionIdToUse,
-      diagnosticLifecycle ? { onPhase: diagnosticLifecycle.setPhase } : undefined,
-    );
+    const output = await executePreparedCliRun(attemptContext, cliSessionIdToUse, {
+      ...(diagnosticLifecycle ? { onPhase: diagnosticLifecycle.setPhase } : {}),
+      ...(!turnSideEffectsDisabled && params.persistAssistantTranscript && params.sessionKey
+        ? { onCommentarySegment: persistCommentarySegment }
+        : {}),
+    });
     params.assertCurrent?.();
     // Test facades and non-instrumented executors may not signal the boundary.
     diagnosticLifecycle?.setPhase("resolve");
@@ -521,6 +544,7 @@ async function runPreparedCliAgentOwned(
         if (!terminalInterruption) {
           await assertCliRuntimeBinding(context);
         }
+        await commentaryWrites;
         const effectiveCliSessionId = output.sessionId ?? fallbackCliSessionId;
         const assistantTranscript = await persistCliAssistantTranscript({
           runParams: params,

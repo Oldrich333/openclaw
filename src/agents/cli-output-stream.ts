@@ -61,6 +61,8 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
   let pendingClaudeText = "";
   let currentClaudeMessageId: string | undefined;
   let currentClaudeMessageText = "";
+  let commentaryMessageId: string | undefined;
+  let commentaryMessageCount = 0;
   let pendingMessageSeparator = false;
   let currentMessageStart = 0;
   let segmentStart = 0;
@@ -116,6 +118,19 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     pendingClaudeText = "";
     if (text) {
       params.onCommentaryText?.(text);
+      // Commentary never joins assistantText, so the terminal reply cannot persist it.
+      if (params.onCommentarySegment) {
+        if (currentClaudeMessageId !== commentaryMessageId) {
+          commentaryMessageId = currentClaudeMessageId;
+          commentaryMessageCount = 0;
+        }
+        const index = commentaryMessageCount++;
+        params.onCommentarySegment({
+          ...(commentaryMessageId ? { key: `${commentaryMessageId}:${index}` } : {}),
+          text,
+          timestamp: Date.now(),
+        });
+      }
     }
   };
 

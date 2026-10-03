@@ -384,6 +384,55 @@ describe("createCliJsonlStreamingParser", () => {
     expect(deltas.at(-1)?.text).toBe("Before.\n\nDONE");
   });
 
+  it.each([
+    { name: "plain", preTool: "The answer is here.", visible: "The answer is here." },
+    {
+      name: "tagged reasoning",
+      preTool: "<thinking>Private analysis.</thinking>The answer is here.",
+      visible: "The answer is here.",
+    },
+  ])("offers commentary for canonical history exactly as shown: $name", ({ preTool, visible }) => {
+    const segments: Array<{ key?: string; text: string }> = [];
+    const commentary: string[] = [];
+    const parser = createClaudeParser({
+      onCommentaryText: (text) => commentary.push(text),
+      onCommentarySegment: ({ key, text }) => segments.push({ key, text }),
+    });
+    finishFrames(
+      parser,
+      init("session-segments"),
+      claudeStreamEvent({ type: "message_start", message: { id: "message-1" } }),
+      claudeTextDelta(preTool),
+      toolStart(),
+      messageStop,
+      claudeStreamEvent({ type: "message_start", message: { id: "message-2" } }),
+      claudeTextDelta("Final answer."),
+      messageStop,
+      result("Final answer."),
+    );
+    expect(commentary).toEqual([visible]);
+    expect(segments).toEqual([{ key: "message-1:0", text: visible }]);
+    expect(parser.getOutput()?.text).toBe("Final answer.");
+  });
+
+  it("offers no history segment while pre-tool text stays in the reply", () => {
+    const segments: unknown[] = [];
+    const parser = createClaudeParser({ onCommentarySegment: (segment) => segments.push(segment) });
+    finishFrames(
+      parser,
+      init("session-no-commentary"),
+      messageStart,
+      claudeTextDelta("The answer is here."),
+      toolStart(),
+      messageStop,
+      messageStart,
+      claudeTextDelta("Final answer."),
+      result("Final answer."),
+    );
+    expect(segments).toEqual([]);
+    expect(parser.getOutput()?.text).toContain("The answer is here.");
+  });
+
   it("judges post-interim-result segments on their own stream state", () => {
     const deltas: Array<{ text: string; delta: string }> = [];
     const parser = createParser({ onAssistantDelta: (delta) => deltas.push(delta) });
