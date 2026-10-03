@@ -34,7 +34,7 @@ it("keeps genuine cancellation attached after requester execution starts", async
   const dispatch = vi.fn(async (_method, _params, options) => {
     options?.onExecutionStarted?.();
     return await new Promise((_resolve, reject) => {
-      options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+      options?.signal?.addEventListener("abort", () => reject(options.signal?.reason as Error), {
         once: true,
       });
     });
