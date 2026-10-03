@@ -342,6 +342,30 @@ async function runPreparedCliAgentOwned(
 
   let deliveredMessagingSideEffect = false;
   let userTurnHandled = false;
+  let segmentWrites = Promise.resolve();
+  let segmentCount = 0;
+  let segmentsWritten = true;
+  const persistSegment = (segment: { key: string; text: string; timestamp: number }) => {
+    segmentCount += 1;
+    segmentWrites = segmentWrites
+      .then(async () => {
+        const result = await persistCliAssistantTranscript({
+          runParams: params,
+          text: segment.text,
+          modelId: context.modelId,
+          stopReason: "stop",
+          segmentKey: segment.key,
+          timestamp: segment.timestamp,
+        });
+        if (!result.idempotencyKey) {
+          segmentsWritten = false;
+        }
+      })
+      .catch((error: unknown) => {
+        segmentsWritten = false;
+        log.warn(`CLI assistant segment persistence failed: ${formatErrorMessage(error)}`);
+      });
+  };
   const executeCliAttempt = async (cliSessionIdToUse?: string, options?: CliRecoveryOptions) => {
     const timeoutMs = options?.timeoutMs ?? params.timeoutMs;
     const forkCliSessionOnResume =
@@ -376,11 +400,12 @@ async function runPreparedCliAgentOwned(
             },
           };
     diagnosticLifecycle?.setPhase("send");
-    const output = await executePreparedCliRun(
-      attemptContext,
-      cliSessionIdToUse,
-      diagnosticLifecycle ? { onPhase: diagnosticLifecycle.setPhase } : undefined,
-    );
+    const output = await executePreparedCliRun(attemptContext, cliSessionIdToUse, {
+      ...(diagnosticLifecycle ? { onPhase: diagnosticLifecycle.setPhase } : {}),
+      ...(!turnSideEffectsDisabled && params.persistAssistantTranscript && params.sessionKey
+        ? { onAssistantTextSegment: persistSegment }
+        : {}),
+    });
     params.assertCurrent?.();
     // Test facades and non-instrumented executors may not signal the boundary.
     diagnosticLifecycle?.setPhase("resolve");
@@ -536,12 +561,17 @@ async function runPreparedCliAgentOwned(
         if (!terminalInterruption) {
           await assertCliRuntimeBinding(context);
         }
+        await segmentWrites;
         const effectiveCliSessionId = output.sessionId ?? fallbackCliSessionId;
         const assistantTranscript = await persistCliAssistantTranscript({
           runParams: params,
           // Dispatch owns source-reply transcript mirrors and their idempotency keys.
           // Persisting them here would duplicate the same visible assistant reply.
-          text: sourceReplyWasDelivered ? "" : assistantText,
+          text: sourceReplyWasDelivered
+            ? ""
+            : segmentCount > 0 && segmentsWritten && output.transcriptFinalText !== undefined
+              ? output.transcriptFinalText
+              : assistantText,
           modelId: context.modelId,
           usage: output.usage,
           stopReason: resolveCliAssistantStopReason(output),

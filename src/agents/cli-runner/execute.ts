@@ -111,6 +111,7 @@ function assertExactToolAvailabilityRuntimeVersion(params: {
 
 type ExecutePreparedCliRunOptions = {
   onPhase?: (phase: "send" | "resolve" | "cleanup") => void;
+  onAssistantTextSegment?: (segment: { key: string; text: string; timestamp: number }) => void;
 };
 
 type PreparedCliRunInternalParams = PreparedCliRunContext["params"] & {
@@ -584,6 +585,7 @@ export async function executePreparedCliRun(
         cliTurnStartedAt,
         observeForkSuccessor,
         options,
+        onAssistantTextSegment: options?.onAssistantTextSegment,
       });
     } catch (error) {
       recordRunError(error);

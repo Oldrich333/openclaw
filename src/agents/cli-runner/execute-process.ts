@@ -76,6 +76,7 @@ export async function executeCliProcess(params: {
   cliTurnStartedAt: number;
   observeForkSuccessor: (sessionId: string) => void;
   options?: ExecuteCliProcessOptions;
+  onAssistantTextSegment?: (segment: { key: string; text: string; timestamp: number }) => void;
 }): Promise<CliOutput> {
   const context = params.context;
   const runParams = context.params;
@@ -113,6 +114,7 @@ export async function executeCliProcess(params: {
         onSessionId: params.observeForkSuccessor,
         onNativeTools: context.preparedBackend.mcpClientGrantCapture?.captureNativeTools,
         onAssistantMessage: params.diagnostics?.observeAssistantMessage,
+        onAssistantTextSegment: params.onAssistantTextSegment,
         onUsage: params.diagnostics?.observeUsage,
         onAttributedSubagentProgress: (parentToolUseId) => {
           if (!params.events.isActiveForegroundAgentTool(parentToolUseId)) {

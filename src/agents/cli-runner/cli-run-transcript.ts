@@ -136,6 +136,8 @@ export async function persistCliAssistantTranscript(params: {
   usage?: CliUsage;
   stopReason: StopReason;
   yielded?: true;
+  segmentKey?: string;
+  timestamp?: number;
 }): Promise<{
   owned: boolean;
   idempotencyKey?: string;
@@ -153,7 +155,7 @@ export async function persistCliAssistantTranscript(params: {
     return { owned: false };
   }
   try {
-    const idempotencyKey = `cli-assistant:${runParams.runId}`;
+    const idempotencyKey = `cli-assistant:${runParams.runId}${params.segmentKey ? `:seg:${params.segmentKey}` : ""}`;
     const result = await appendExactAssistantMessageToSessionTranscript({
       sessionKey: runParams.sessionKey,
       agentId: runParams.agentId,
@@ -214,6 +216,7 @@ export async function persistCliAssistantTranscript(params: {
               },
             }
           : {}),
+        ...(params.timestamp !== undefined ? { timestamp: params.timestamp } : {}),
       },
     });
     if (!result.ok) {

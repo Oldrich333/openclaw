@@ -384,6 +384,57 @@ describe("createCliJsonlStreamingParser", () => {
     expect(deltas.at(-1)?.text).toBe("Before.\n\nDONE");
   });
 
+  it.each([false, true])(
+    "offers completed native text segments for canonical history with commentary=%s",
+    (commentary) => {
+      const segments: Array<{ key: string; text: string; timestamp: number }> = [];
+      const parser = createClaudeParser({
+        onAssistantTextSegment: (segment) => segments.push(segment),
+        ...(commentary ? { onCommentaryText: () => {} } : {}),
+      });
+      finishFrames(
+        parser,
+        init("session-segments"),
+        messageStart,
+        claudeTextDelta("The answer is here."),
+        toolStart(),
+        {
+          type: "assistant",
+          message: {
+            id: "message-1",
+            role: "assistant",
+            content: [{ type: "text", text: "The answer is here." }],
+          },
+        },
+        {
+          type: "assistant",
+          message: {
+            id: "message-1",
+            role: "assistant",
+            content: [{ type: "text", text: "The answer is here." }],
+          },
+        },
+        messageStop,
+        messageStart,
+        claudeTextDelta("Final answer."),
+        {
+          type: "assistant",
+          message: {
+            id: "message-2",
+            role: "assistant",
+            content: [{ type: "text", text: "Final answer." }],
+          },
+        },
+        result("Final answer."),
+      );
+      expect(segments).toMatchObject([{ key: "message-1:0", text: "The answer is here." }]);
+      expect(segments[0]?.timestamp).toBeGreaterThan(0);
+      expect(parser.getOutput()).toMatchObject({
+        transcriptFinalText: "Final answer.",
+      });
+    },
+  );
+
   it("judges post-interim-result segments on their own stream state", () => {
     const deltas: Array<{ text: string; delta: string }> = [];
     const parser = createParser({ onAssistantDelta: (delta) => deltas.push(delta) });

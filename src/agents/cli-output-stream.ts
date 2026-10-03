@@ -50,6 +50,7 @@ import {
   frameBoundedCliJsonlChunk,
   streamJsonOutputLimitErrorText,
 } from "./cli-output-stream-limits.js";
+import { createCliAssistantTextSegmentCapture } from "./cli-output-transcript-segments.js";
 export const CLI_STREAM_JSON_MISSING_RESULT_ERROR =
   "CLI stream-json output ended without a result event.";
 const CLAUDE_SYNTHETIC_NO_RESPONSE_ERROR = "Claude CLI returned a synthetic no-response result.";
@@ -61,6 +62,9 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
   let pendingClaudeText = "";
   let currentClaudeMessageId: string | undefined;
   let currentClaudeMessageText = "";
+  const transcriptSegments = params.onAssistantTextSegment
+    ? createCliAssistantTextSegmentCapture(params.onAssistantTextSegment)
+    : undefined;
   let pendingMessageSeparator = false;
   let currentMessageStart = 0;
   let segmentStart = 0;
@@ -337,6 +341,9 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
         }
       }
       resumeCheckpointId = pickCliResumeCheckpointId({ ...params, parsed }) ?? resumeCheckpointId;
+      if (claudeStreamJson) {
+        transcriptSegments?.observe(parsed.message);
+      }
       params.onAssistantMessage?.(parsed.message);
       if (claudeStreamJson && isClaudeSyntheticNoResponse(parsed)) {
         sawClaudeSyntheticNoResponse = true;
@@ -431,6 +438,9 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       output = {
         ...result,
         text,
+        ...(transcriptSegments?.hasFlushed()
+          ? { transcriptFinalText: result.text || assistantText.slice(currentMessageStart).trim() }
+          : {}),
         ...((textParts.length > 1 ||
           output?.textParts ||
           parsed.openclaw_interim_result === true) &&

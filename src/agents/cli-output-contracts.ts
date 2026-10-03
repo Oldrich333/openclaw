@@ -44,6 +44,8 @@ export type CliTerminalInterruption = {
 /** Normalized result from a CLI-backed model provider turn. */
 export type CliOutput = {
   text: string;
+  /** Last native Claude result text, for canonical transcript writes after prior segments. */
+  transcriptFinalText?: string;
   /** Completed result boundaries, retained for independent delivery and retry. */
   textParts?: string[];
   rawText?: string;
@@ -141,6 +143,7 @@ export type CliJsonlStreamingParserOptions = {
   /** Parent initialization fact; its authority owner validates the raw tool list. */
   onNativeTools?: (tools: unknown) => void;
   onAssistantMessage?: (message: unknown) => void;
+  onAssistantTextSegment?: (segment: { key: string; text: string; timestamp: number }) => void;
   onUsage?: (usage: CliUsage, terminal: boolean) => void;
   /** Semantic subagent work for an active parent Agent call. Not a parent-lane event. */
   onAttributedSubagentProgress?: (parentToolUseId: string) => void;
