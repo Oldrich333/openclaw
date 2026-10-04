@@ -392,17 +392,24 @@ describe("createCliJsonlStreamingParser", () => {
       visible: "The answer is here.",
     },
   ])("offers commentary for canonical history exactly as shown: $name", ({ preTool, visible }) => {
-    const segments: Array<{ key?: string; text: string }> = [];
+    const segments: unknown[] = [];
     const commentary: string[] = [];
     const parser = createClaudeParser({
       onCommentaryText: (text) => commentary.push(text),
-      onCommentarySegment: ({ key, text }) => segments.push({ key, text }),
+      onCommentarySegment: ({ key, text, native }) => segments.push({ key, text, native }),
     });
     finishFrames(
       parser,
       init("session-segments"),
       claudeStreamEvent({ type: "message_start", message: { id: "message-1" } }),
+      claudeStreamEvent({ type: "content_block_start", content_block: { type: "text" } }),
       claudeTextDelta(preTool),
+      // Claude Code's completed text-block snapshot, keyed like its native session record.
+      {
+        type: "assistant",
+        uuid: "entry-pre-tool",
+        message: { id: "message-1", role: "assistant", content: [{ type: "text", text: preTool }] },
+      },
       toolStart(),
       messageStop,
       claudeStreamEvent({ type: "message_start", message: { id: "message-2" } }),
@@ -411,8 +418,40 @@ describe("createCliJsonlStreamingParser", () => {
       result("Final answer."),
     );
     expect(commentary).toEqual([visible]);
-    expect(segments).toEqual([{ key: "message-1:0", text: visible }]);
+    expect(segments).toEqual([
+      {
+        key: "message-1:0",
+        text: visible,
+        native: { entryId: "entry-pre-tool", sessionId: "session-segments" },
+      },
+    ]);
     expect(parser.getOutput()?.text).toBe("Final answer.");
+  });
+
+  it("never names an earlier text block's native record for later commentary", () => {
+    const segments: unknown[] = [];
+    const parser = createClaudeParser({
+      onCommentaryText: () => {},
+      onCommentarySegment: ({ text, native }) => segments.push({ text, native }),
+    });
+    finishFrames(
+      parser,
+      init("session-segments"),
+      claudeStreamEvent({ type: "message_start", message: { id: "message-1" } }),
+      claudeStreamEvent({ type: "content_block_start", content_block: { type: "text" } }),
+      claudeTextDelta("First block."),
+      {
+        type: "assistant",
+        uuid: "entry-first",
+        message: { id: "message-1", role: "assistant", content: [{ type: "text", text: "x" }] },
+      },
+      claudeStreamEvent({ type: "content_block_start", content_block: { type: "text" } }),
+      claudeTextDelta("Second block."),
+      toolStart(),
+      messageStop,
+      result("Done."),
+    );
+    expect(segments).toEqual([{ text: "Second block.", native: undefined }]);
   });
 
   it("offers no history segment while pre-tool text stays in the reply", () => {

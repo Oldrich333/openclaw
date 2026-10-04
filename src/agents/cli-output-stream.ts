@@ -63,6 +63,8 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
   let currentClaudeMessageText = "";
   let commentaryMessageId: string | undefined;
   let commentaryMessageCount = 0;
+  // Claude's own record id (`uuid`) of the text block now being streamed.
+  let currentClaudeTextEntryId: string | undefined;
   let pendingMessageSeparator = false;
   let currentMessageStart = 0;
   let segmentStart = 0;
@@ -129,6 +131,9 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
           ...(commentaryMessageId ? { key: `${commentaryMessageId}:${index}` } : {}),
           text,
           timestamp: Date.now(),
+          ...(currentClaudeTextEntryId && sessionId
+            ? { native: { entryId: currentClaudeTextEntryId, sessionId } }
+            : {}),
         });
       }
     }
@@ -193,6 +198,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     currentMessageHadToolUse = false;
     currentClaudeMessageId = messageId;
     currentClaudeMessageText = "";
+    currentClaudeTextEntryId = undefined;
   };
 
   const handleCustomJsonlEvent = (event: CliBackendParsedJsonlEvent) => {
@@ -342,6 +348,16 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
           } else {
             beginClaudeMessage(messageId);
           }
+        }
+        // Claude Code emits one snapshot per completed content block, keyed by the same
+        // `uuid` as its native session record; a text snapshot precedes the next block start.
+        const hasText =
+          Array.isArray(parsed.message.content) &&
+          parsed.message.content.some(
+            (block) => isRecord(block) && block.type === "text" && typeof block.text === "string",
+          );
+        if (hasText && typeof parsed.uuid === "string") {
+          currentClaudeTextEntryId = parsed.uuid;
         }
       }
       resumeCheckpointId = pickCliResumeCheckpointId({ ...params, parsed }) ?? resumeCheckpointId;
@@ -504,6 +520,13 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
         evt.type === "content_block_start" &&
         isRecord(evt.content_block) &&
         isClaudeToolUseBlockType(evt.content_block.type);
+      if (
+        evt.type === "content_block_start" &&
+        isRecord(evt.content_block) &&
+        evt.content_block.type === "text"
+      ) {
+        currentClaudeTextEntryId = undefined;
+      }
       if (isToolUseBlockStart) {
         sawToolUseSinceText = true;
         currentMessageHadToolUse = true;

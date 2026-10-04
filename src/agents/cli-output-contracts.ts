@@ -41,8 +41,17 @@ export type CliTerminalInterruption = {
   reason: "aborted" | "timeout";
 };
 
-/** One completed pre-tool commentary block; `key` names its native message when known. */
-export type CliCommentarySegment = { key?: string; text: string; timestamp: number };
+/**
+ * One completed pre-tool commentary block; `key` names its native message when known.
+ * `native` names the CLI's own record of that block, so history pairs the two even when
+ * display transforms changed the text.
+ */
+export type CliCommentarySegment = {
+  key?: string;
+  text: string;
+  timestamp: number;
+  native?: { entryId: string; sessionId: string };
+};
 
 /** Normalized result from a CLI-backed model provider turn. */
 export type CliOutput = {

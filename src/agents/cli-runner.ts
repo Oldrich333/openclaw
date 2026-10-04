@@ -343,6 +343,7 @@ async function runPreparedCliAgentOwned(
           stopReason: "stop",
           segmentKey,
           timestamp: segment.timestamp,
+          ...(segment.native ? { nativeEntry: segment.native } : {}),
         });
       })
       .catch((error: unknown) => {

@@ -118,6 +118,7 @@ it("persists a completed CLI segment once before its distinct final reply", asyn
     stopReason: "stop" as const,
     segmentKey: "message-1:0",
     timestamp: 1_790_000_000_000,
+    nativeEntry: { entryId: "native-entry-1", sessionId: "native-session-1" },
   };
   await persistCliAssistantTranscript(segment);
   await persistCliAssistantTranscript(segment);
@@ -135,6 +136,13 @@ it("persists a completed CLI segment once before its distinct final reply", asyn
       content: [{ type: "text", text: "The answer is here." }],
       timestamp: segment.timestamp,
       idempotencyKey: "cli-assistant:cli-segment-run:seg:message-1:0",
+      __openclaw: {
+        cliNativeRef: {
+          externalId: "native-entry-1",
+          importedFrom: "claude-cli",
+          cliSessionId: "native-session-1",
+        },
+      },
     },
     {
       content: [{ type: "text", text: "Final answer." }],

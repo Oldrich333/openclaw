@@ -139,6 +139,8 @@ export async function persistCliAssistantTranscript(params: {
   yielded?: true;
   segmentKey?: string;
   timestamp?: number;
+  /** The CLI's own record of this text; history pairs it with its import by identity. */
+  nativeEntry?: { entryId: string; sessionId: string };
 }): Promise<{
   owned: boolean;
   idempotencyKey?: string;
@@ -218,6 +220,17 @@ export async function persistCliAssistantTranscript(params: {
             }
           : {}),
         ...(params.timestamp !== undefined ? { timestamp: params.timestamp } : {}),
+        ...(params.nativeEntry
+          ? {
+              __openclaw: {
+                cliNativeRef: {
+                  externalId: params.nativeEntry.entryId,
+                  importedFrom: runParams.provider,
+                  cliSessionId: params.nativeEntry.sessionId,
+                },
+              },
+            }
+          : {}),
       },
     });
     if (!result.ok) {
