@@ -639,6 +639,7 @@ async function runSubagentAnnounceFlowBound(
     ) {
       await deleteSubagentSessionForCleanup({
         callGateway: callSubagentLifecycleGateway,
+        gatewayBinding: { resolveGatewayContext: params.resolveGatewayContext },
         prepareCurrent: prepareChildSessionEffects,
         isCurrent: childSessionEffectsAllowed,
         childSessionKey: params.childSessionKey,

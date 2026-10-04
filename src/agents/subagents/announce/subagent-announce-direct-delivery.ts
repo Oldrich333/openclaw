@@ -31,7 +31,11 @@ import {
   hasFailedSubagentNoOutputCompletion,
   hasVisibleCompletionResult,
 } from "../../internal-event-contract.js";
-import type { AgentInternalEvent } from "../../internal-events.js";
+import { buildAgentInternalEventContext, type AgentInternalEvent } from "../../internal-events.js";
+import {
+  RUNTIME_EVENT_USER_PROMPT,
+  projectRuntimeContextFragments,
+} from "../../internal-runtime-context.js";
 import type { GatewayToolCallerReceiptAdmission } from "../../tools/gateway-caller-receipt.types.js";
 import {
   SOURCE_OWNER_CHANGED,
@@ -123,6 +127,10 @@ export async function sendSubagentAnnounceDirectly(
   const parentOnly = params.completionTarget === "parent";
   const cfg = getSubagentAnnounceRuntimeConfig();
   const announceTimeoutMs = resolveSubagentAnnounceTimeoutMs(cfg);
+  const runtimeContextFragments = buildAgentInternalEventContext(params.internalEvents);
+  const turnMessage = runtimeContextFragments.length
+    ? RUNTIME_EVENT_USER_PROMPT
+    : params.triggerMessage;
   const canonicalRequesterSessionKey = resolveRequesterStoreKey(
     cfg,
     params.targetRequesterSessionKey,
@@ -321,6 +329,14 @@ export async function sendSubagentAnnounceDirectly(
           ? { debounceMs: requesterQueueSettings.debounceMs }
           : {}),
         waitForTranscriptCommit: true,
+        ...(runtimeContextFragments.length
+          ? {
+              currentInboundContext: {
+                text: projectRuntimeContextFragments(runtimeContextFragments),
+                fragments: runtimeContextFragments,
+              },
+            }
+          : {}),
         ...(params.createUserTurnTranscriptRecorder
           ? {
               userTurnTranscriptRecorder: params.createUserTurnTranscriptRecorder(
@@ -333,7 +349,7 @@ export async function sendSubagentAnnounceDirectly(
       // and transcript retries before treating an active wake as failed.
       const wakeOutcome = await resolveActiveWakeWithRetries(
         requesterActivity.sessionId,
-        params.triggerMessage,
+        turnMessage,
         wakeOptions,
         params.signal,
         isCompletionDeliveryAllowed,
@@ -385,7 +401,7 @@ export async function sendSubagentAnnounceDirectly(
           }
         : {}),
       sessionKey: canonicalRequesterSessionKey,
-      message: params.triggerMessage,
+      message: turnMessage,
       deliver: shouldDeliverAgentFinal,
       bestEffortDeliver: params.bestEffortDeliver,
       internalEvents: params.internalEvents,

@@ -4,13 +4,6 @@ import {
   selectAcpSessionRows,
 } from "../acp/runtime/session-meta-keys.js";
 import {
-  countMcpOAuthPrincipalsInDatabase,
-  listMcpOAuthStoreKeysInDatabase,
-  readMcpOAuthPendingInDatabase,
-  readMcpOAuthStoreIfPresentInDatabase,
-  readMcpOAuthStatusesInDatabase,
-} from "../agents/mcp-oauth-store.kernel.js";
-import {
   loadSubagentMaintenanceRunsInDatabase,
   loadVersionedSubagentRunsInDatabase,
   loadSubagentRunsForSessionsInDatabase,
@@ -55,10 +48,6 @@ import { readWorkerPlacementChangeSnapshotInDatabase } from "../gateway/worker-e
 import { readWorkspaceJournalInDatabase } from "../gateway/worker-environments/placement-workspace-journal.js";
 import { isWorkspaceJournalReadCommand } from "../gateway/worker-environments/placement-workspace-journal.types.js";
 import { listPendingWorkerWorkspaceResultsInDatabase } from "../gateway/worker-environments/placement-workspace-result.js";
-import {
-  readWorkerEnvironmentFacts,
-  readWorkerEnvironmentPrunePage,
-} from "../gateway/worker-environments/store-row-codec.js";
 import { getSqliteRuntimeCapabilities } from "../infra/bun-sqlite-library.js";
 import { executeDevicePairingRead } from "../infra/device-pairing-read.kernel.js";
 import { readExecApprovalsConfigRow } from "../infra/exec-approvals-sqlite.js";
@@ -110,6 +99,7 @@ import {
   isStateDiagnosticCommand,
   readStateDiagnosticCommand,
 } from "./openclaw-state-read-diagnostics.js";
+import { readMcpOAuthStateCommand } from "./openclaw-state-read-mcp-oauth.js";
 import { stateReadRegistry } from "./openclaw-state-read-operation-registry.js";
 import { readStateRegistryCommand } from "./openclaw-state-read-registry.js";
 import type {
@@ -321,35 +311,14 @@ serveOwnedWorkerTasks(
                 runs: new Map(rows.map((entry) => [entry.runId, entry])),
               };
             }
-            if (command.type === "mcpOAuth.statuses") {
-              return {
-                type: command.type,
-                value: readMcpOAuthStatusesInDatabase(db, command.input),
-              };
-            }
-            if (command.type === "mcpOAuth.readOnly") {
-              return {
-                type: command.type,
-                value: readMcpOAuthStoreIfPresentInDatabase(db, command.input),
-              };
-            }
-            if (command.type === "mcpOAuth.keys") {
-              return {
-                type: command.type,
-                value: listMcpOAuthStoreKeysInDatabase(db, command.input),
-              };
-            }
-            if (command.type === "mcpOAuth.pending") {
-              return {
-                type: command.type,
-                value: readMcpOAuthPendingInDatabase(db, command.input),
-              };
-            }
-            if (command.type === "mcpOAuth.countPrincipals") {
-              return {
-                type: command.type,
-                value: countMcpOAuthPrincipalsInDatabase(db, command.input),
-              };
+            if (
+              command.type === "mcpOAuth.statuses" ||
+              command.type === "mcpOAuth.readOnly" ||
+              command.type === "mcpOAuth.keys" ||
+              command.type === "mcpOAuth.pending" ||
+              command.type === "mcpOAuth.countPrincipals"
+            ) {
+              return readMcpOAuthStateCommand(db, command);
             }
             if (command.type === "sessionGroups.snapshot") {
               return {
@@ -469,20 +438,6 @@ serveOwnedWorkerTasks(
               return {
                 type: command.type,
                 row: readExecApprovalsConfigRow(db),
-              };
-            }
-            if (command.type === "workerEnvironments.snapshot") {
-              return {
-                type: command.type,
-                facts: runSqliteDeferredTransactionSync(db, () =>
-                  readWorkerEnvironmentFacts(db, command.ids),
-                ),
-              };
-            }
-            if (command.type === "workerEnvironments.pruneCandidates") {
-              return {
-                type: command.type,
-                page: readWorkerEnvironmentPrunePage(db, command.input),
               };
             }
             if (command.type === "skills.library.descriptions") {
