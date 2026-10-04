@@ -384,12 +384,20 @@ async function runPreparedCliAgentOwned(
             },
           };
     diagnosticLifecycle?.setPhase("send");
-    const output = await executePreparedCliRun(attemptContext, cliSessionIdToUse, {
-      ...(diagnosticLifecycle ? { onPhase: diagnosticLifecycle.setPhase } : {}),
-      ...(!turnSideEffectsDisabled && params.persistAssistantTranscript && params.sessionKey
-        ? { onCommentarySegment: persistCommentarySegment }
-        : {}),
-    });
+    const onCommentarySegment =
+      !turnSideEffectsDisabled && params.persistAssistantTranscript && params.sessionKey
+        ? persistCommentarySegment
+        : undefined;
+    const output = await executePreparedCliRun(
+      attemptContext,
+      cliSessionIdToUse,
+      diagnosticLifecycle || onCommentarySegment
+        ? {
+            ...(diagnosticLifecycle ? { onPhase: diagnosticLifecycle.setPhase } : {}),
+            ...(onCommentarySegment ? { onCommentarySegment } : {}),
+          }
+        : undefined,
+    );
     params.assertCurrent?.();
     // Test facades and non-instrumented executors may not signal the boundary.
     diagnosticLifecycle?.setPhase("resolve");
