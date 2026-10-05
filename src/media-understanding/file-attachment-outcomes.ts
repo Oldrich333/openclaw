@@ -121,13 +121,15 @@ export function isSkippedFileOutcome(outcome: FileAttachmentOutcome): boolean {
 
 export function renderFileAttachmentOutcome(
   outcome: FileAttachmentOutcome,
-  options?: { selfServeLocalPath?: string | false },
+  options?: { selfServeLocalPath?: string | false; userPaste?: boolean },
 ): string | null {
   switch (outcome.kind) {
     case "extracted":
       return [
         renderDocumentTruncationNotice(outcome.metadata),
-        wrapUntrustedAttachmentContent(outcome.text),
+        // A gateway-client paste carries the same authority as the message text
+        // of the same request; only its length moved it into a file.
+        options?.userPaste ? outcome.text : wrapUntrustedAttachmentContent(outcome.text),
       ]
         .filter(Boolean)
         .join("\n");

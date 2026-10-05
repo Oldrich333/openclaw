@@ -28,6 +28,28 @@ function render(outcome: FileAttachmentOutcome): string | null {
 }
 
 describe("renderFileAttachmentOutcome", () => {
+  it("renders a gateway-client paste as plain text and keeps the boundary for everything else", () => {
+    const outcome: FileAttachmentOutcome = { kind: "extracted", text: "pasted log", images: [] };
+
+    expect(renderFileAttachmentOutcome(outcome, { userPaste: true })).toBe("pasted log");
+    expect(
+      renderFileAttachmentOutcome(
+        {
+          ...outcome,
+          metadata: { pages: undefined, textTruncated: true, imagesTruncated: false },
+        },
+        { userPaste: true },
+      ),
+    ).toBe("[Partial document: text truncated.]\npasted log");
+    expect(render(outcome)).toBe(expectedUntrustedContent("pasted log"));
+    expect(
+      renderFileAttachmentOutcome(
+        { kind: "unsupported-format", mime: "application/msword", localPath: "/tmp/a.doc" },
+        { userPaste: true },
+      ),
+    ).toContain("<<<EXTERNAL_UNTRUSTED_CONTENT");
+  });
+
   it.each<{ outcome: FileAttachmentOutcome; expected: string | null }>([
     {
       outcome: {
