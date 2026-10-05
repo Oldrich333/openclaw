@@ -13,6 +13,7 @@ import type { DB } from "../../state/openclaw-agent-db.generated.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { isSameOpenClawAgentDatabasePath } from "../../state/openclaw-agent-db.paths.js";
 import type { SessionTranscriptRuntimeTarget } from "./session-accessor.types.js";
+import { readTranscriptGenerationEpoch } from "./transcript-generation-epoch.js";
 import { transcriptEventNavigationSql } from "./transcript-payload.js";
 
 const transcriptReadFenceStorage = new AsyncLocalStorage<UserTurnTranscriptAdmissionReceipt>();
@@ -210,8 +211,11 @@ export function resolveSqliteSessionTranscriptReadFence(params: {
       `Current-turn transcript admission is no longer a visible message: ${receipt.entryId}`,
     );
   }
+  // The generation is session-wide: an in-place rewrite of any row (steer confirmation, prompt
+  // annotation) rotates it within the same epoch while the admitted row stays where it was.
   if (
-    boundary.generation !== receipt.generation ||
+    readTranscriptGenerationEpoch(boundary.generation) !==
+      readTranscriptGenerationEpoch(receipt.generation) ||
     boundary.seq !== receipt.rawSeq ||
     boundary.parent_id !== receipt.effectiveParentId ||
     boundary.message_position !== receipt.activeMessagePosition

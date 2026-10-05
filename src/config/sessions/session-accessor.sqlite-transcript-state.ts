@@ -26,6 +26,7 @@ import {
   normalizeStoreSessionKey,
   resolveDeliveryProvenCanonicalSessionKey,
 } from "./store-entry.js";
+import { createRowsPreservingTranscriptGeneration } from "./transcript-generation-epoch.js";
 
 function createTranscriptContextVersionQuery(database: Pick<OpenClawAgentDatabase, "db">) {
   const db = getSessionKysely(database.db);
@@ -111,13 +112,22 @@ export function ensureTranscriptGenerationInTransaction(
   );
 }
 
-/** Rotate the watermark in the same transaction as destructive transcript replacement. */
+/**
+ * Rotate the watermark in the same transaction as a transcript rewrite or replacement.
+ * Rows-preserving rewrites keep the epoch that current-turn read fences compare.
+ */
 export function rotateTranscriptGenerationInTransaction(
   database: OpenClawAgentDatabase,
   sessionId: string,
+  options: { preserveRows?: boolean } = {},
 ): string {
   const db = getSessionKysely(database.db);
-  const generation = createTranscriptGeneration();
+  const previous = options.preserveRows
+    ? readTranscriptGenerationInTransaction(database, sessionId)
+    : undefined;
+  const generation = previous
+    ? createRowsPreservingTranscriptGeneration(previous, createTranscriptGeneration())
+    : createTranscriptGeneration();
   executeSqliteQuerySync(
     database.db,
     db

@@ -8,6 +8,7 @@ import {
   appendTranscriptEvent,
   persistSessionTranscriptTurn,
   readActiveTranscriptEntryAnchor,
+  rewriteTranscriptMessageAtAnchor,
 } from "./session-accessor.js";
 import {
   everySessionTranscriptUserInputFrom,
@@ -190,4 +191,45 @@ describe("SQLite admitted input reset fence", () => {
       ).toEqual(human ? ["source:user", "human:user"] : ["source:user"]);
     },
   );
+  it("keeps a running turn's fence after an in-place rewrite of a later row", async () => {
+    await persistSessionTranscriptTurn(scope, {
+      messages: [
+        transcriptMessage("source", null, {
+          role: "user",
+          content: "source",
+          idempotencyKey: "source:user",
+        }),
+        transcriptMessage("admitted", "source", {
+          role: "user",
+          content: "admitted",
+          idempotencyKey: "admitted:user",
+        }),
+        transcriptMessage("steered", "admitted", {
+          role: "user",
+          content: "follow-up",
+          idempotencyKey: "steered:user",
+        }),
+      ],
+      touchSessionEntry: false,
+    });
+    const anchor = readActiveTranscriptEntryAnchor({ ...scope, entryId: "admitted" });
+    const steered = readActiveTranscriptEntryAnchor({ ...scope, entryId: "steered" });
+    if (!anchor || !steered) {
+      throw new Error("missing real admission anchor");
+    }
+    // Same write the steer confirmation performs: one row rewritten in place.
+    const rewritten = await rewriteTranscriptMessageAtAnchor(steered, (message) => ({
+      ...(message as Record<string, unknown>),
+      __openclaw: { steerTargetRunId: "running-turn" },
+    }));
+    expect(rewritten?.generation).toBeDefined();
+    expect(rewritten?.generation).not.toBe(anchor.generation);
+
+    expect(
+      runWithSessionTranscriptReadFence(
+        { ...anchor, logicalTurnId: "running-turn", role: "user" },
+        () => everySessionTranscriptUserInputFrom(scope, "source:user", () => true),
+      ),
+    ).toBe(true);
+  });
 });

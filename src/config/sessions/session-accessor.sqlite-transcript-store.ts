@@ -502,7 +502,7 @@ export function rewriteSqliteTranscriptEventRowsInTransaction(
       );
     }
   }
-  rotateTranscriptGenerationInTransaction(database, resolved.sessionId);
+  rotateTranscriptGenerationInTransaction(database, resolved.sessionId, { preserveRows: true });
   touchTranscriptMutationInTransaction(database, resolved.sessionId);
   if (!projectionUnchanged) {
     if (options.legacyTextStorage) {
@@ -566,7 +566,7 @@ export function updateSqliteTranscriptEventJsonInTransaction(
   for (const row of updates) {
     update({ seq: row.seq, ...prepareTranscriptPayload(database.db, row.eventJson) });
   }
-  rotateTranscriptGenerationInTransaction(database, sessionId);
+  rotateTranscriptGenerationInTransaction(database, sessionId, { preserveRows: true });
   reconcileRewrittenTranscriptIndex(database, sessionId, rebuildSynchronously);
   recordTranscriptReplacementMutation(
     database,

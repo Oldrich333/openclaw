@@ -179,6 +179,11 @@ describe("session transcript runtime read fence", () => {
         ),
       ).rejects.toBeInstanceOf(SessionTranscriptReadFenceError);
     }
+    // An in-place rewrite rotates the generation within its epoch; the admission stays valid.
+    const rewritten = { ...receipt, generation: `${receipt.generation}-in-place` };
+    expect(
+      runWithSessionTranscriptReadFence(rewritten, () => loadTranscriptEventsSync(scope)),
+    ).toEqual(runWithSessionTranscriptReadFence(receipt, () => loadTranscriptEventsSync(scope)));
     const events = loadTranscriptEventsSync(scope);
     expect(replaceTranscriptEventsSync(scope, events)).toBe(true);
     expect(() =>
