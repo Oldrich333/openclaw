@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 import { createServer as createHttpServer, type ServerResponse } from "node:http";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
@@ -18,6 +19,10 @@ import {
   sendHttpRequestRejection,
 } from "../infra/http-request-lifecycle.js";
 import { logDebug, logWarn } from "../logger.js";
+import {
+  getPluginRuntimeGatewayRequestScope,
+  withPluginRuntimeGatewayContextResolver,
+} from "../plugins/runtime/gateway-request-scope.js";
 import { runOutsidePluginRuntimeGenerationScope } from "../plugins/runtime/generation-scope.js";
 import { runOutsideGatewayRootWorkAdmission } from "../process/gateway-work-admission.js";
 import {
@@ -58,6 +63,12 @@ import {
 
 const MAX_MCP_BODY_BYTES = 1_048_576;
 const MCP_HTTP_KEEPALIVE_MS = 15_000;
+
+// Node serves requests in the listener's listen-time async context. The first
+// claude-cli turn starts this listener lazily; without a boot snapshot every later
+// request would inherit that turn's stores (transcript read fence, run scopes,
+// operator authority). Gateway startup imports this module before turns.
+const runInMcpLoopbackListenerContext = AsyncLocalStorage.snapshot();
 
 function keepMcpResponseAlive(res: ServerResponse, contentType: string, frame: string): () => void {
   const timer = setInterval(() => {
@@ -573,9 +584,22 @@ export async function ensureMcpLoopbackServer(port = 0): Promise<void> {
   if (!activeMcpLoopbackServerPromise) {
     // The listener owns its context until Gateway close; callers own only requests.
     // The first turn's work and plugin generation can retire before later requests.
+    // Keep only the starter's Gateway binding; its turn-local stores stay with that turn.
     const work = new AsyncWorkScope();
-    activeMcpLoopbackServerPromise = runOutsidePluginRuntimeGenerationScope(() =>
-      runOutsideGatewayRootWorkAdmission(() => work.run(() => startMcpLoopbackServer(port, work))),
+    const starter = getPluginRuntimeGatewayRequestScope();
+    const resolveGatewayContext =
+      starter?.resolveGatewayContext ?? starter?.context?.resolveGatewayContext;
+    activeMcpLoopbackServerPromise = runInMcpLoopbackListenerContext(() =>
+      withPluginRuntimeGatewayContextResolver(
+        resolveGatewayContext,
+        () =>
+          runOutsidePluginRuntimeGenerationScope(() =>
+            runOutsideGatewayRootWorkAdmission(() =>
+              work.run(() => startMcpLoopbackServer(port, work)),
+            ),
+          ),
+        { inheritRequestScope: false },
+      ),
     )
       .then((close) => {
         closeActiveMcpLoopbackServer = close;
