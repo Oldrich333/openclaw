@@ -8,13 +8,16 @@ import type { UserTurnTranscriptAdmissionReceipt } from "../sessions/user-turn-t
 import { getActiveMcpLoopbackRuntime } from "./mcp-http.loopback-runtime.js";
 
 const { execute, resolveTools } = vi.hoisted(() => ({ execute: vi.fn(), resolveTools: vi.fn() }));
+// mock-isolation: avoid reading host config while probing only the listener's async context.
 vi.mock("../config/io.js", () => {
   const config = {};
   return { getRuntimeConfig: () => config };
 });
+// mock-isolation: bypass plugin hooks so only the listener-to-tool dispatch context is measured.
 vi.mock("../agents/agent-tools.before-tool-call.js", () => ({
   runBeforeToolCallHook: async ({ params }: { params: unknown }) => ({ blocked: false, params }),
 }));
+// mock-isolation: supply a synthetic tool that records the async stores seen at dispatch.
 vi.mock("./tool-resolution.js", () => ({ resolveGatewayScopedTools: resolveTools }));
 
 const completed = { content: [{ type: "text", text: "probe completed" }] };
