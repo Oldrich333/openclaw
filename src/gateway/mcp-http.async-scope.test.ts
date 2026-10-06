@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import {
@@ -10,6 +11,10 @@ import {
   withGatewayToolCallerIdentity,
 } from "../agents/tools/gateway-caller-context.js";
 import {
+  resolveSessionTranscriptReadFence,
+  runWithSessionTranscriptReadFence,
+} from "../config/sessions/session-transcript-read-fence.js";
+import {
   getPluginRuntimeGatewayRequestScope,
   withPluginRuntimeGatewayRequestScope,
 } from "../plugins/runtime/gateway-request-scope.js";
@@ -17,6 +22,7 @@ import {
   isGatewaySubordinateWorkAdmissionClosed,
   tryBeginGatewayRootWorkAdmission,
 } from "../process/gateway-work-admission.js";
+import type { UserTurnTranscriptAdmissionReceipt } from "../sessions/user-turn-transcript.types.js";
 import { AsyncWorkScope, getAsyncWorkSignal, trackAsyncWork } from "../shared/async-work-scope.js";
 
 const { execute, resolveTools } = vi.hoisted(() => ({ execute: vi.fn(), resolveTools: vi.fn() }));
@@ -32,13 +38,20 @@ vi.mock("./tool-resolution.js", () => ({ resolveGatewayScopedTools: resolveTools
 import {
   activateMcpLoopbackClientGrantCapture,
   mintMcpLoopbackClientGrant,
+  revokeMcpLoopbackClientGrant,
 } from "./mcp-grant-store.js";
 import { closeMcpLoopbackServer, ensureMcpLoopbackServer } from "./mcp-http.js";
 import { getActiveMcpLoopbackRuntime } from "./mcp-http.loopback-runtime.js";
+import { createGatewayMethodRegistry } from "./methods/registry.js";
 import {
   readOperatorToolGatewayAuthority,
   runWithOperatorToolGatewayAuthority,
 } from "./operator-tool-gateway-authority.js";
+import { createDirectChatContext } from "./server-chat.agent-events.test-helpers.js";
+import type { GatewayRequestHandlerOptions } from "./server-methods/types.js";
+import { withOperatorToolGatewayAuthority } from "./server-plugin-in-process-authority.js";
+import { dispatchGatewayMethodInProcessRaw } from "./server-plugin-in-process-dispatch.js";
+import { createSyntheticPluginRuntimeClient } from "./server-plugin-runtime-client.js";
 
 const completed = { content: [{ type: "text", text: "tracked tool completed" }] };
 const executionScopes: Array<AbortSignal | undefined> = [];
@@ -254,6 +267,158 @@ describe("MCP HTTP work ownership", () => {
     await callForRun("run-unscoped");
 
     expect(observed).toEqual([owner, recovery, undefined]);
+  });
+
+  it("serves later requests outside every async store of the turn that started it", async () => {
+    const session = { agentId: "main", sessionId: "first-turn-session" };
+    const receipt: UserTurnTranscriptAdmissionReceipt = {
+      ...session,
+      sessionKey: "agent:main:first-turn",
+      storePath: "first-turn-store",
+      generation: "first-turn-generation",
+      entryId: "first-turn-user",
+      rawSeq: 1,
+      effectiveParentId: null,
+      activeMessagePosition: 0,
+      logicalTurnId: "first-turn",
+      role: "user",
+    };
+    // Stands in for turn-local stores this listener does not name explicitly.
+    const turnLocal = new AsyncLocalStorage<string>();
+    const observed: unknown[] = [];
+    execute.mockImplementation(() => {
+      observed.push([resolveSessionTranscriptReadFence(session), turnLocal.getStore()]);
+      return completed;
+    });
+    await turnLocal.run("first-turn", () =>
+      runWithSessionTranscriptReadFence(receipt, () => {
+        expect(resolveSessionTranscriptReadFence(session)).toBe(receipt);
+        return ensureMcpLoopbackServer();
+      }),
+    );
+    expect(await callTool()).toMatchObject({ result: { ...completed, isError: false } });
+    expect(observed).toEqual([[undefined, undefined]]);
+  });
+
+  it("keeps each CLI grant's own ceiling and liveness for an admin dispatch after a write-only starter", async () => {
+    const adminDispatch = vi.fn(({ respond }: GatewayRequestHandlerOptions) => {
+      respond(true, { allowed: true });
+    });
+    const registry = createGatewayMethodRegistry([
+      {
+        name: "scope.probe",
+        owner: { kind: "core", area: "scope-proof" },
+        scope: "operator.admin",
+        handler: adminDispatch,
+      },
+    ]);
+    const context = createDirectChatContext({
+      getRuntimeConfig: () => ({}),
+      getGatewayMethodRegistry: () => registry,
+    });
+    const scopeFor = (
+      client: ReturnType<typeof createSyntheticPluginRuntimeClient>,
+      isCurrent: () => boolean,
+    ) => ({
+      client,
+      isWebchatConnect: () => false,
+      resolveGatewayContext: () => context,
+      hasCurrentClientAuthority: isCurrent,
+    });
+    const writeOnly = createSyntheticPluginRuntimeClient({ scopes: ["operator.write"] });
+    const admin = createSyntheticPluginRuntimeClient({ scopes: ["operator.admin"] });
+    let ownerCurrent = true;
+    execute.mockImplementation(async () => {
+      const result = await dispatchGatewayMethodInProcessRaw(
+        "scope.probe",
+        {},
+        { resolveGatewayContext: () => context },
+      );
+      return {
+        content: [{ type: "text", text: result.ok ? "admin-dispatched" : result.error?.message }],
+      };
+    });
+    // A write-only restart-recovery run starts the listener with its operator authority.
+    await withPluginRuntimeGatewayRequestScope(
+      scopeFor(writeOnly, () => true),
+      () =>
+        withOperatorToolGatewayAuthority({ scopes: ["operator.write"] }, () =>
+          ensureMcpLoopbackServer(),
+        ),
+    );
+    const runtime = getActiveMcpLoopbackRuntime();
+    if (!runtime) {
+      throw new Error("MCP runtime missing");
+    }
+    const admit = async (
+      runId: string,
+      client: ReturnType<typeof createSyntheticPluginRuntimeClient>,
+      isCurrent: () => boolean,
+    ) => {
+      const admission = prepareAgentRunAdmission({
+        cfg: {},
+        facts: {
+          runId,
+          agentId: "main",
+          ingress: { kind: "system", boundary: "mcp-scope-proof", state: "present" },
+        },
+        operationalRunInstance: createOperationalRunInstanceRef(runId),
+      });
+      admissions.push(admission);
+      const admittedRunContext = await admission.admit("gateway", `gateway-${runId}`);
+      const grant = withPluginRuntimeGatewayRequestScope(scopeFor(client, isCurrent), () =>
+        mintMcpLoopbackClientGrant({
+          context: { sessionKey: "agent:main:scope-proof", senderIsOwner: true },
+          runtimeOwnerToken: runtime.ownerToken,
+          admittedRunContext,
+        }),
+      );
+      const captureKey = `capture-${runId}`;
+      expect(
+        activateMcpLoopbackClientGrantCapture({
+          token: grant.token,
+          runtimeOwnerToken: runtime.ownerToken,
+          captureKey,
+        }),
+      ).toBeTruthy();
+      return { token: grant.token, captureKey };
+    };
+    const ownerGrant = await admit("mcp-owner", admin, () => ownerCurrent);
+    const recoveryGrant = await admit("mcp-recovery", writeOnly, () => true);
+
+    expect(await callTool(ownerGrant)).toMatchObject({
+      result: { content: [{ text: "admin-dispatched" }], isError: false },
+    });
+    expect(await callTool(recoveryGrant)).toMatchObject({
+      result: { content: [{ text: "missing scope: operator.admin" }] },
+    });
+    expect(adminDispatch).toHaveBeenCalledTimes(1);
+
+    ownerCurrent = false;
+    expect(await callTool(ownerGrant)).toMatchObject({
+      result: {
+        content: [{ text: "Gateway requester authority changed" }],
+      },
+    });
+    expect(adminDispatch).toHaveBeenCalledTimes(1);
+    expect(revokeMcpLoopbackClientGrant(ownerGrant.token)).toBe(true);
+    const runtimeAfter = getActiveMcpLoopbackRuntime();
+    const revoked = await fetch(`http://127.0.0.1:${runtimeAfter?.port}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${ownerGrant.token}`,
+        "content-type": "application/json",
+        "x-openclaw-cli-capture-key": ownerGrant.captureKey,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "scope_probe", arguments: {} },
+      }),
+    });
+    expect(revoked.status).toBe(401);
+    expect(adminDispatch).toHaveBeenCalledTimes(1);
   });
 
   it("joins accepted tool cleanup without closing a replacement listener", async () => {
