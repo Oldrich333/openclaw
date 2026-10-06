@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 import { createServer as createHttpServer, type ServerResponse } from "node:http";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
@@ -19,6 +18,7 @@ import {
   createHttpRequestAbortSignal,
   sendHttpRequestRejection,
 } from "../infra/http-request-lifecycle.js";
+import { runInProcessRootAsyncContext } from "../infra/process-root-async-context.js";
 import { logDebug, logWarn } from "../logger.js";
 import {
   getPluginRuntimeGatewayRequestScope,
@@ -66,13 +66,6 @@ import { runOutsideOperatorToolGatewayAuthority } from "./operator-tool-gateway-
 
 const MAX_MCP_BODY_BYTES = 1_048_576;
 const MCP_HTTP_KEEPALIVE_MS = 15_000;
-
-// Node serves every request in the listener's listen-time async context, and the
-// first CLI turn starts this listener lazily. Exiting stores one by one still
-// leaks the rest of that turn (its transcript read fence, Cron creator authority),
-// so the listener starts in this load-time snapshot. Gateway method registration
-// imports this module before turns, as with runInMcpManagerContext.
-const runInMcpLoopbackListenerContext = AsyncLocalStorage.snapshot();
 
 function keepMcpResponseAlive(res: ServerResponse, contentType: string, frame: string): () => void {
   const timer = setInterval(() => {
@@ -592,9 +585,12 @@ export async function ensureMcpLoopbackServer(port = 0): Promise<void> {
     // The process-owned listener must outlive its creator's work, generation, and authority.
     // Its handlers also must not inherit the starting request's caller: a write-only
     // restart-recovery run would otherwise cap every later turn's bridge calls.
+    // Node serves each request in the listen-time async context, so the listener starts
+    // in the process-root context: no store of the starting turn (its transcript read
+    // fence, Cron creator authority) follows later requests.
     const work = new AsyncWorkScope();
     const resolveGatewayContext = getPluginRuntimeGatewayRequestScope()?.resolveGatewayContext;
-    activeMcpLoopbackServerPromise = runInMcpLoopbackListenerContext(() =>
+    activeMcpLoopbackServerPromise = runInProcessRootAsyncContext(() =>
       runOutsideOperatorToolGatewayAuthority(() =>
         withoutGatewayToolCallerIdentity(() =>
           withPluginRuntimeGatewayContextResolver(
