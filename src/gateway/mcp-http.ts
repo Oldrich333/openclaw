@@ -28,7 +28,7 @@ import {
   isAgentHarnessSessionKey,
   isAgentHarnessSessionStoreEntryProtected,
 } from "../sessions/agent-harness-session-key.js";
-import { AsyncWorkScope, runWithTrackedCancellation } from "../shared/async-work-scope.js";
+import { runWithTrackedCancellation } from "../shared/async-work-scope.js";
 import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
 import {
   registerMcpLoopbackClientGrantRevocationListener,
@@ -55,6 +55,7 @@ import {
   resolveMcpRequestContext,
   validateMcpLoopbackRequest,
 } from "./mcp-http.request.js";
+import { GatewayConnectionWork } from "./server-connection-work.js";
 
 // Loopback MCP server exposes gateway-scoped tools to local MCP clients over a
 // bearer-token HTTP endpoint bound to 127.0.0.1. Only one active server/runtime
@@ -136,7 +137,7 @@ function jsonRpcInternalError(parsed: unknown) {
 /** Starts a new MCP loopback HTTP server and registers its bearer tokens. */
 async function startMcpLoopbackServer(
   port: number,
-  work: AsyncWorkScope,
+  work: GatewayConnectionWork,
 ): Promise<() => Promise<void>> {
   // Shutdown preloads this module even when no MCP listener is needed.
   const [
@@ -571,8 +572,8 @@ export async function ensureMcpLoopbackServer(port = 0): Promise<void> {
     return;
   }
   if (!activeMcpLoopbackServerPromise) {
-    // HTTP callbacks inherit listen-time context; retain the Gateway binding, not the turn.
-    const work = new AsyncWorkScope();
+    // Retain Gateway workers through the work owner; HTTP callbacks must not inherit the turn.
+    const work = new GatewayConnectionWork();
     const resolveGatewayContext = getPluginRuntimeGatewayRequestScope()?.resolveGatewayContext;
     activeMcpLoopbackServerPromise = runInDetachedAsyncContext(() =>
       withPluginRuntimeGatewayContextResolver(

@@ -14,6 +14,8 @@ import {
   resolveSessionTranscriptReadFence,
   runWithSessionTranscriptReadFence,
 } from "../config/sessions/session-transcript-read-fence.js";
+import { readOnlyWorkerScope } from "../infra/sqlite-readonly-worker-context.js";
+import { createSqliteReadOnlyWorkerScope } from "../infra/sqlite-readonly-worker.js";
 import {
   getPluginRuntimeGatewayRequestScope,
   withPluginRuntimeGatewayRequestScope,
@@ -201,7 +203,7 @@ describe("MCP HTTP work ownership", () => {
     ]);
   });
 
-  it("serves later requests outside every async store of the turn that started it", async () => {
+  it("keeps Gateway readers while shedding the starting turn's async stores", async () => {
     const session = { agentId: "main", sessionId: "first-turn-session" };
     const receipt: UserTurnTranscriptAdmissionReceipt = {
       ...session,
@@ -217,19 +219,32 @@ describe("MCP HTTP work ownership", () => {
     };
     // Stands in for turn-local stores this listener does not name explicitly.
     const turnLocal = new AsyncLocalStorage<string>();
+    const readers = createSqliteReadOnlyWorkerScope();
+    const readerContext = readers.run(() => readOnlyWorkerScope.getStore());
     const observed: unknown[] = [];
     execute.mockImplementation(() => {
-      observed.push([resolveSessionTranscriptReadFence(session), turnLocal.getStore()]);
+      observed.push([
+        resolveSessionTranscriptReadFence(session),
+        turnLocal.getStore(),
+        readOnlyWorkerScope.getStore(),
+      ]);
       return completed;
     });
-    await turnLocal.run("first-turn", () =>
-      runWithSessionTranscriptReadFence(receipt, () => {
-        expect(resolveSessionTranscriptReadFence(session)).toBe(receipt);
-        return ensureMcpLoopbackServer();
-      }),
-    );
-    expect(await callTool()).toMatchObject({ result: { ...completed, isError: false } });
-    expect(observed).toEqual([[undefined, undefined]]);
+    try {
+      await readers.run(() =>
+        turnLocal.run("first-turn", () =>
+          runWithSessionTranscriptReadFence(receipt, () => {
+            expect(resolveSessionTranscriptReadFence(session)).toBe(receipt);
+            return ensureMcpLoopbackServer();
+          }),
+        ),
+      );
+      expect(await callTool()).toMatchObject({ result: { ...completed, isError: false } });
+      expect(observed).toEqual([[undefined, undefined, readerContext]]);
+    } finally {
+      await closeMcpLoopbackServer();
+      await readers.close();
+    }
   });
 
   it("keeps each CLI grant's own ceiling and liveness for an admin dispatch after a write-only starter", async () => {
