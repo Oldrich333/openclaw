@@ -25,7 +25,8 @@ it.each([
     const root = await fs.realpath(dirs.make("openclaw-entry-replacement-"));
     const sources = [
       "src/entry.ts",
-      "src/infra/process-root-async-context.ts",
+      "src/shared/detached-async-context.ts",
+      "src/shared/global-singleton.ts",
       "src/cli/dotenv.ts",
       "src/logging.ts",
       "src/cli/failure-output.ts",
