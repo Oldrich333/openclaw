@@ -33,11 +33,6 @@ import { buildSessionContext, SessionManager } from "../sessions/session-manager
 import { createCliRunCurrentAssertion } from "./execution-target.js";
 import type { PreparedCliRunContext } from "./types.js";
 
-// A finished or aborted run may still settle its own transcript rows (delivery media
-// rewrite, aborted partial) after its lane released the session. Its planning snapshot
-// is then stale before anything committed; plan again instead of failing the turn.
-const CLI_HISTORY_PREPARATION_ATTEMPTS = 3;
-
 /**
  * History belongs to the local transcript, not the latest native handle. Cover only
  * a proven-empty start or the contiguous events of the previously admitted CLI run.
@@ -48,20 +43,19 @@ export async function prepareCliHistoryBoundary(
   params: PreparedCliRunContext["params"],
   identity: { credential?: AuthProfileCredential },
 ): Promise<CliHistoryWriter | undefined> {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      return await prepareCliHistoryBoundaryOnce(params, identity);
-    } catch (error) {
-      if (
-        attempt >= CLI_HISTORY_PREPARATION_ATTEMPTS ||
-        params.abortSignal?.aborted ||
-        !(error instanceof Error) ||
-        error.message !== CLI_HISTORY_CHANGED_BEFORE_PREPARATION
-      ) {
-        throw error;
-      }
+  try {
+    return await prepareCliHistoryBoundaryOnce(params, identity);
+  } catch (error) {
+    if (
+      params.abortSignal?.aborted ||
+      !(error instanceof Error) ||
+      error.message !== CLI_HISTORY_CHANGED_BEFORE_PREPARATION
+    ) {
+      throw error;
     }
   }
+  // Settlement can move the tip after planning. Nothing committed; reread once.
+  return prepareCliHistoryBoundaryOnce(params, identity);
 }
 
 async function prepareCliHistoryBoundaryOnce(

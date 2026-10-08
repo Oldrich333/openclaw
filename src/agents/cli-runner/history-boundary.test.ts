@@ -233,9 +233,9 @@ describe("CLI transcript account boundary", () => {
       await f.seed();
       const abort = new AbortController();
       const patch = patchSessionEntryCore;
-      // Every planning attempt meets a new intervening change: the bounded re-plan gives up.
-      vi.spyOn(sessionAccessor, "patchSessionEntryCore").mockImplementation(
-        (target, update, options) =>
+      const spy = vi
+        .spyOn(sessionAccessor, "patchSessionEntryCore")
+        .mockImplementation((target, update, options) =>
           patch(
             target,
             async (...args) => {
@@ -257,7 +257,7 @@ describe("CLI transcript account boundary", () => {
             },
             options,
           ),
-      );
+        );
       await f.withRun(
         "changed-preparation",
         async (params) => {
@@ -266,6 +266,11 @@ describe("CLI transcript account boundary", () => {
               credential: { type: "token", provider: "test-cli", token: "epoch-a" },
             }),
           ).rejects.toThrow();
+          if (change === "append" || change === "rewrite") {
+            expect(spy).toHaveBeenCalledTimes(2);
+          } else if (change === "revocation") {
+            expect(spy).toHaveBeenCalledOnce();
+          }
           expect(loadSessionEntryReadOnly(f.target)?.activeWriterRunId).not.toBe(params.runId);
         },
         { abortSignal: abort.signal },
