@@ -32,6 +32,51 @@ const { maybeWakeRequesterAfterAllChildrenSettled } =
   await import("./subagent-announce.requester-settle-wake.js");
 
 describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
+  it.each(["undelivered", "transport"] as const)(
+    "retries a spent descendant wait after restore without another deferral cycle (%s)",
+    async (failure) => {
+      const child = makeSettledChild({
+        runId: "spent-wait",
+        requesterSettleWake: {
+          status: "pending",
+          attemptCount: 0,
+          requesterYieldBatch: true,
+          rearmGeneration: 1,
+          batchRunIds: ["spent-wait"],
+          deferralCount: 9,
+        },
+      });
+      registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([child]);
+      readDescendantFacts.mockResolvedValue({ unsettled: true, active: 0 });
+      if (failure === "transport") {
+        deliverSpy.mockRejectedValueOnce(new Error("temporary transport failure"));
+      } else {
+        deliverSpy.mockResolvedValueOnce({ delivered: false, path: "direct" });
+      }
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      try {
+        await expect(
+          maybeWakeRequesterAfterAllChildrenSettled(wakeParams({ settledEntry: child })),
+        ).resolves.toBe(false);
+        expect(deliverSpy).toHaveBeenCalledOnce();
+        const restored = structuredClone(child);
+        registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([restored]);
+        await expect(
+          maybeWakeRequesterAfterAllChildrenSettled(wakeParams({ settledEntry: restored })),
+        ).resolves.toBe(false);
+        expect(deliverSpy).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(30_000);
+        await expect(
+          maybeWakeRequesterAfterAllChildrenSettled(wakeParams({ settledEntry: restored })),
+        ).resolves.toBe(true);
+        expect(deliverSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("coalesces concurrent row restores without recharging the persisted attempt", async () => {
     const children = ["run-a", "run-b"].map((runId) =>
       makeSettledChild({
@@ -286,6 +331,7 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
     expect(transitionBatchSpy).toHaveBeenNthCalledWith(1, ["run-a", "run-b", "run-c"], {
       status: "dispatching",
       attemptCount: 1,
+      deferralCount: 0,
       batchRunIds: ["run-a", "run-b", "run-c"],
     });
     expect(transitionBatchSpy.mock.invocationCallOrder[0]).toBeLessThan(

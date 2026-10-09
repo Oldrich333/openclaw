@@ -349,11 +349,17 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
       if ((state.nextAttemptAt ?? 0) > now) {
         return false;
       }
-      // Live descendant or requester work is not a stale settle loop.
-      // Reset their stale-deferral budget so long-running waves cannot terminalize
-      // an already completed sibling before the requester can receive it.
-      const deferralCount = countTowardsLimit ? (state.deferralCount ?? 0) + 1 : 0;
+      // Active work still defers delivery, but cannot recharge a spent wait.
+      const deferralCount =
+        (state.deferralCount ?? 0) >= REQUESTER_SETTLE_WAKE_MAX_DEFERRALS
+          ? REQUESTER_SETTLE_WAKE_MAX_DEFERRALS
+          : countTowardsLimit
+            ? (state.deferralCount ?? 0) + 1
+            : 0;
       if (countTowardsLimit && deferralCount >= REQUESTER_SETTLE_WAKE_MAX_DEFERRALS) {
+        if (state.deferralCount !== deferralCount) {
+          await transitionBatch({ ...state, deferralCount });
+        }
         // An ended descendant whose own delivery never settles (its requester
         // is gone, rate-limited, or running outside the registry) must not cost
         // this batch its completed results: stop waiting and deliver them.
@@ -677,6 +683,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
         nextAttemptAt: Date.now() + retryDelayMs,
         batchRunIds: retainedBatchRunIds,
         ...retainedYieldIdentity(state),
+        deferralCount: state.deferralCount,
         lastError,
       };
       await transitionBatch(state);
@@ -730,6 +737,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
       nextAttemptAt: Date.now() + retryDelayMs,
       batchRunIds: retainedBatchRunIds,
       ...retainedYieldIdentity(state),
+      deferralCount: state.deferralCount,
       lastError,
     });
     logWarn(
