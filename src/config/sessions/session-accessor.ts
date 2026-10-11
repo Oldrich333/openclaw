@@ -292,7 +292,10 @@ export type {
   SessionTranscriptMessageEventPage,
 } from "./session-accessor.sqlite-projection-read.js";
 export type { SessionTranscriptWatermark } from "./session-accessor.sqlite-transcript-watermark-read.js";
-export { readSessionTranscriptWatermark } from "./session-accessor.sqlite-transcript-watermark.js";
+export {
+  readCliHistoryAuthoritySnapshot,
+  readSessionTranscriptWatermark,
+} from "./session-accessor.sqlite-transcript-watermark.js";
 export {
   bindSessionTranscriptStoreScope,
   resolveSessionTranscriptDatabasePath,

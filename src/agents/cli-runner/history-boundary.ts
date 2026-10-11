@@ -7,9 +7,8 @@ import {
   type CliHistoryWriter,
 } from "../../config/sessions/cli-history-boundary.js";
 import {
-  loadSessionEntryReadOnly,
   patchSessionEntryCore,
-  readSessionTranscriptWatermark,
+  readCliHistoryAuthoritySnapshot,
   resolveSessionTranscriptDatabasePath,
   waitForSessionTranscriptProjection,
 } from "../../config/sessions/session-accessor.js";
@@ -210,13 +209,12 @@ async function prepareCliHistoryBoundaryOnce(
       assertPhysicalSource();
       // The actor publishes exact boundary/tip facts at settlement. Unbound native
       // callers retain their existing synchronous final-authority guard until P12.
-      const stored: InternalSessionEntry | undefined = incognito
-        ? undefined
-        : loadSessionEntryReadOnly(target);
+      const authoritySnapshot = incognito ? undefined : readCliHistoryAuthoritySnapshot(target);
+      const stored: InternalSessionEntry | undefined = authoritySnapshot?.entry;
       const current = incognito ? incognito.actor.sessions.readSteering(target.sessionKey) : stored;
       const history = incognito?.actor.sessions.readCliHistory(target.sessionKey);
       const proof = incognito ? history?.boundary : stored?.cliHistoryBoundary;
-      const tip = incognito ? history?.watermark : readSessionTranscriptWatermark(target);
+      const tip = incognito ? history?.watermark : authoritySnapshot?.watermark;
       if (
         !current ||
         current.sessionId !== target.sessionId ||

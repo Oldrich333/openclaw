@@ -13,6 +13,7 @@ import {
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
 import * as sessionAccessor from "../../config/sessions/session-accessor.js";
+import * as entryRead from "../../config/sessions/session-accessor.sqlite-entry-read.js";
 import { readActiveTranscriptEntryAnchor } from "../../config/sessions/session-accessor.sqlite-transcript-anchor.js";
 import { appendTranscriptEventSync } from "../../config/sessions/session-accessor.sqlite-transcript-write.test-support.js";
 import { projectPublicSessionEntry } from "../../config/sessions/session-entry-projection.js";
@@ -157,6 +158,61 @@ async function settleNativeBinding(
 }
 
 describe("CLI transcript account boundary", () => {
+  it("keeps the history claim and transcript tip on one snapshot across an owned append", async () => {
+    const f = await fixture();
+    await f.withRun("snapshot-race", async (params) => {
+      const writer = await prepareCliHistoryBoundary(params, {
+        credential: { type: "token", provider: "test-cli", token: "epoch-a" },
+      });
+      expect(writer).toBeDefined();
+      const originalRead = entryRead.readSessionEntryRow;
+      let appended = false;
+      vi.spyOn(entryRead, "readSessionEntryRow").mockImplementation((database, key, projection) => {
+        const selected = originalRead(database, key, projection);
+        if (!appended && key === f.target.sessionKey && selected?.entry.cliHistoryBoundary?.state === "known") {
+          const foreign = new DatabaseSync(f.target.storePath);
+          try {
+            foreign.exec("BEGIN IMMEDIATE");
+            const row = foreign
+              .prepare("SELECT entry_json FROM session_nodes WHERE session_key = ?")
+              .get(f.target.sessionKey) as { entry_json: string };
+            const entry = JSON.parse(row.entry_json) as InternalSessionEntry;
+            const boundary = entry.cliHistoryBoundary;
+            if (boundary?.state !== "known") {
+              throw new Error("Missing known history boundary");
+            }
+            const nextSeq = (boundary.maxSeq ?? -1) + 1;
+            foreign
+              .prepare("INSERT INTO transcript_events (session_id, seq, event_json, created_at) VALUES (?, ?, ?, ?)")
+              .run(
+                f.target.sessionId,
+                nextSeq,
+                JSON.stringify({ type: "message", message: { role: "user", content: "owned append" } }),
+                Date.now(),
+              );
+            foreign
+              .prepare("UPDATE session_nodes SET entry_json = ? WHERE session_key = ?")
+              .run(
+                JSON.stringify({ ...entry, cliHistoryBoundary: { ...boundary, maxSeq: nextSeq } }),
+                f.target.sessionKey,
+              );
+            foreign.exec("COMMIT");
+            appended = true;
+          } finally {
+            if (foreign.isTransaction) {
+              foreign.exec("ROLLBACK");
+            }
+            foreign.close();
+          }
+        }
+        return selected;
+      });
+      expect(() => writer?.assertReadable()).not.toThrow();
+      expect(appended).toBe(true);
+      expect(() => writer?.assertReadable()).not.toThrow();
+    });
+  });
+
   it("prepares and commits CLI history without caller-thread data SQL", async () => {
     const f = await fixture();
     await f.seed();

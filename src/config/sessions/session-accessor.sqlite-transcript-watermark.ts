@@ -13,12 +13,16 @@ import {
 } from "../../state/openclaw-agent-db-readonly.js";
 import type { DB } from "../../state/openclaw-agent-db.generated.js";
 import type { SessionTranscriptReadScope } from "./session-accessor.sqlite-contract.js";
+import { readSessionEntryRow } from "./session-accessor.sqlite-entry-read.js";
 import {
+  resolveSqliteScope,
   resolveSqliteTranscriptReadScope,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
 import type { SessionTranscriptWatermark } from "./session-accessor.sqlite-transcript-watermark-read.js";
 import { readSessionActorTransactionState } from "./session-actor-transaction.js";
+import type { SessionTranscriptRuntimeTarget } from "./session-accessor.types.js";
+import type { InternalSessionEntry } from "./types.js";
 
 const retainedWatermarkQuery = createSqliteQueryCache((database) => {
   const db = getNodeSqliteKysely<DB>(database);
@@ -72,4 +76,22 @@ export function readSessionTranscriptWatermark(
     toDatabaseOptions(resolved),
   );
   return result.found ? result.value : { generation: null, maxSeq: null };
+}
+
+/** Read the CLI writer claim and transcript tip from one committed snapshot. */
+export function readCliHistoryAuthoritySnapshot(
+  scope: SessionTranscriptRuntimeTarget,
+): { entry: InternalSessionEntry | undefined; watermark: SessionTranscriptWatermark } {
+  const resolved = resolveSqliteScope(scope);
+  const result = withOpenClawAgentDatabaseReadOnly(
+    (database) => ({
+      entry: readSessionEntryRow(database, resolved.sessionKey)?.entry,
+      watermark: readSessionTranscriptWatermarkInDatabase(database, scope.sessionId),
+    }),
+    toDatabaseOptions(resolved),
+    { snapshot: true },
+  );
+  return result.found
+    ? result.value
+    : { entry: undefined, watermark: { generation: null, maxSeq: null } };
 }
