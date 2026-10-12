@@ -1,8 +1,5 @@
 import { executeSqliteQueryTakeFirstSync } from "../../infra/kysely-sync.js";
-import {
-  getSqliteReadScopeRevision,
-  readSqliteNativeMutationRevision,
-} from "../../infra/sqlite-schema-facts.js";
+import { getSqliteReadScopeRevision } from "../../infra/sqlite-schema-facts.js";
 import { assertTransactionUsable } from "../../infra/sqlite-transaction.js";
 import {
   openOpenClawAgentDatabase,
@@ -17,11 +14,19 @@ import {
   type ResolvedTranscriptScope,
 } from "./session-accessor.sqlite-scope.js";
 import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
+import { readSessionActorTransactionState } from "./session-actor-transaction.js";
 import { canonicalSessionValidationQuery } from "./session-canonical-key.js";
 import { validateCanonicalSessionRowEntry } from "./session-canonical-row.js";
+import {
+  retainTranscriptAppendPostimage,
+  type TranscriptAppendPostimage,
+} from "./session-transcript-append-postimage.js";
 import { selectSessionTranscriptIndexStatus } from "./session-transcript-index.js";
 import { SessionTranscriptReadFenceError } from "./session-transcript-read-fence-error.js";
-import type { TranscriptEntryAnchor } from "./transcript-entry-anchor.js";
+import {
+  sameTranscriptEntryAnchor,
+  type TranscriptEntryAnchor,
+} from "./transcript-entry-anchor.js";
 import { readMessageIdempotencyKey } from "./transcript-message-identity.js";
 import type { InternalSessionEntry } from "./types.js";
 
@@ -29,6 +34,38 @@ export type TranscriptSourceAuthority = Pick<
   InternalSessionEntry,
   "permissionMode" | "lifecycleRevision"
 >;
+
+/** Read one active identity using the caller's existing admitted snapshot. */
+export function readActiveTranscriptEntryIdentityInSnapshot(
+  projection: CurrentTranscriptProjection,
+  entryId: string,
+) {
+  const db = getSessionKysely(projection.database.db);
+  return executeSqliteQueryTakeFirstSync(
+    projection.database.db,
+    db
+      .selectFrom("transcript_event_identities as identity")
+      .innerJoin("session_transcript_active_events as active", (join) =>
+        join
+          .onRef("active.session_id", "=", "identity.session_id")
+          .onRef("active.event_seq", "=", "identity.seq"),
+      )
+      .select(["identity.seq", "identity.parent_id as parentId"])
+      .where("identity.session_id", "=", projection.resolved.sessionId)
+      .where("identity.event_id", "=", entryId)
+      .limit(1),
+  );
+}
+
+export function readActivePathEntryRelationFromProjection(
+  projection: CurrentTranscriptProjection,
+  entryId: string | null,
+): "exact" | "ancestor" | "off-path" {
+  if (projection.state.leafEventId === entryId || entryId === null) {
+    return projection.state.leafEventId === entryId ? "exact" : "off-path";
+  }
+  return readActiveTranscriptEntryIdentityInSnapshot(projection, entryId) ? "ancestor" : "off-path";
+}
 
 /** The caller owns admission; anchor and source authority share the current statement snapshot. */
 export function assertSessionTranscriptContextAnchorInDatabase(
@@ -84,12 +121,7 @@ export function assertSessionTranscriptContextAnchorInDatabase(
   } else {
     current = readActiveTranscriptEntryAnchorInTransaction(params);
   }
-  if (
-    !current ||
-    (["generation", "rawSeq", "effectiveParentId", "activeMessagePosition"] as const).some(
-      (field) => current[field] !== through[field],
-    )
-  ) {
+  if (!sameTranscriptEntryAnchor(through, current)) {
     throw new SessionTranscriptReadFenceError("Completed-turn transcript anchor changed");
   }
 }
@@ -127,10 +159,36 @@ export function readActiveTranscriptEntryAnchorFromProjection(
 function readActiveTranscriptEntryFacts(
   params: TranscriptEntryRead,
   projection?: CurrentTranscriptProjection,
+  includeVersion = false,
 ) {
+  const actor = readSessionActorTransactionState(params.database, params.resolved);
+  if (actor) {
+    const state = actor.transcript.projection;
+    if (
+      !state ||
+      state.needsRebuild ||
+      state.hasUnclassifiedEvents ||
+      state.indexedSeq !== actor.hot.transcript.version.rawSeq
+    ) {
+      return undefined;
+    }
+    const identity = actor.transcript.identities.get(params.entryId);
+    const active = identity && actor.transcript.active.get(identity.seq);
+    return identity && active
+      ? {
+          seq: identity.seq,
+          parent_id: identity.parent_id,
+          message_idempotency_key: identity.message_idempotency_key,
+          message_position: active.message_position,
+          generation: actor.hot.transcript.version.generation,
+          latestSeq: actor.hot.transcript.version.rawSeq,
+          transcriptUpdatedAt: actor.hot.transcript.version.updatedAt,
+        }
+      : undefined;
+  }
   const row = executeSqliteQueryTakeFirstSync(
     params.database.db,
-    selectActiveTranscriptEntryAnchor(params, projection),
+    selectActiveTranscriptEntryAnchor(params, projection, includeVersion),
   );
   return row
     ? {
@@ -145,6 +203,7 @@ function readActiveTranscriptEntryFacts(
 function selectActiveTranscriptEntryAnchor(
   params: TranscriptEntryRead,
   projection?: CurrentTranscriptProjection,
+  includeVersion = false,
 ) {
   const query = getSessionKysely(params.database.db)
     .selectFrom("transcript_event_identities as identity")
@@ -174,6 +233,15 @@ function selectActiveTranscriptEntryAnchor(
         (join) => join.onTrue(),
       )
       .select(["rewrite.generation", "status.latestSeq"])
+      .$if(includeVersion, (withVersion) =>
+        withVersion.select((eb) =>
+          eb
+            .selectFrom("session_windows")
+            .select("transcript_updated_at")
+            .whereRef("session_windows.session_id", "=", "identity.session_id")
+            .as("transcriptUpdatedAt"),
+        ),
+      )
       // Branch changes retain old rows; readiness and the anchor share this statement's snapshot.
       .where("status.needs_reconcile", "is not", 1),
   );
@@ -188,19 +256,28 @@ export function readActiveTranscriptEntryAnchorInTransaction(
 
 /** The append receipt shares its anchor read with the subsequent visible-tail consumer. */
 export function readTranscriptMessageAppendMetadataInTransaction(params: TranscriptEntryRead) {
-  const revision = getSqliteReadScopeRevision(params.database.db)?.mutationRevision;
-  const row = readActiveTranscriptEntryFacts(params);
+  const revision = getSqliteReadScopeRevision(params.database.db);
+  const row = readActiveTranscriptEntryFacts(params, undefined, true);
   const anchor = createTranscriptEntryAnchor({ ...params, row });
-  return {
-    anchor,
-    visibleTailEntryId:
-      anchor &&
-      row?.seq === row?.latestSeq &&
-      revision !== undefined &&
-      readSqliteNativeMutationRevision(params.database.db) === revision
-        ? params.entryId
-        : undefined,
-  };
+  const postimage: TranscriptAppendPostimage | undefined =
+    revision && anchor && typeof row?.latestSeq === "number"
+      ? {
+          revision,
+          anchor,
+          version: {
+            generation: anchor.generation,
+            rawSeq: row.latestSeq,
+            updatedAt: row.transcriptUpdatedAt ?? null,
+          },
+        }
+      : undefined;
+  return retainTranscriptAppendPostimage(
+    {
+      anchor,
+      visibleTailEntryId: anchor && row?.seq === row?.latestSeq ? params.entryId : undefined,
+    },
+    postimage,
+  );
 }
 
 /** Projects anchor fields after the caller verifies readiness in the same snapshot. */
